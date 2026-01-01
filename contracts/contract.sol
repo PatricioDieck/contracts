@@ -2,8 +2,10 @@
 pragma solidity ^0.8.20;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
-contract EscrowV01 is ReentrancyGuard {
+contract EscrowV01 is ReentrancyGuard, EIP712 {
 
     enum Status {
         Funded,
@@ -11,6 +13,15 @@ contract EscrowV01 is ReentrancyGuard {
         Disputed,
         Resolved
     }
+
+    /// @dev EIP-712 typed data for dispute resolution. This binds the verdict to:
+    /// - this specific contract (via EIP-712 domain "verifyingContract")
+    /// - this chain (via EIP-712 domain "chainId")
+    /// - the specific case + winner + rationale + on-chain pointers
+    bytes32 private constant RESOLVE_TYPEHASH =
+        keccak256(
+            "Resolve(uint256 caseId,address winner,bytes32 rationale,bytes32 specs,bytes32 deliverables)"
+        );
 
     struct Case {
         address payer;
@@ -33,6 +44,10 @@ contract EscrowV01 is ReentrancyGuard {
     uint256 public nextCaseId;
     mapping(uint256 => Case) public cases;
 
+    /// @notice The trusted arbiter signer for MVP (AI service / Safe).
+    /// @dev Set once at deploy time to keep the contract minimal.
+    address public immutable aiJudge;
+
     event CaseCreated(
         uint256 indexed caseId,
         address indexed payer,
@@ -52,6 +67,11 @@ contract EscrowV01 is ReentrancyGuard {
         address winner,
         bytes32 rationale
     );
+
+    constructor(address _aiJudge) EIP712("BabyBitcoinEscrow", "1") {
+        require(_aiJudge != address(0), "bad arbiter");
+        aiJudge = _aiJudge;
+    }
 
     function createCase(
         address payee,
@@ -130,7 +150,45 @@ contract EscrowV01 is ReentrancyGuard {
         emit DisputeOpened(caseId);
     }
 
-    // if dispute is open, AI resolve function gets called automatically 
+    /// @notice Resolve a dispute using an EIP-712 signed verdict from the arbiter signer.
+    /// @dev Anyone can submit the signature; only `aiJudge` can authorize the outcome.
+    function resolveDispute(
+        uint256 caseId,
+        address winner,
+        bytes32 rationale,
+        bytes calldata signature
+    ) external nonReentrant {
+        Case storage c = cases[caseId];
+        require(c.status == Status.Disputed, "wrong status");
+        require(winner == c.payer || winner == c.payee, "bad winner");
+        require(c.amount > 0, "empty amount");
+
+        bytes32 structHash = keccak256(
+            abi.encode(
+                RESOLVE_TYPEHASH,
+                caseId,
+                winner,
+                rationale,
+                c.specs,
+                c.deliverables
+            )
+        );
+        bytes32 digest = _hashTypedDataV4(structHash);
+        address recovered = ECDSA.recover(digest, signature);
+        require(recovered == aiJudge, "bad signature");
+
+        // Effects (CEI)
+        c.status = Status.Resolved;
+        uint256 amt = c.amount;
+        c.amount = 0;
+
+        // interaction last
+        (bool ok, ) = winner.call{value: amt}("");
+        require(ok, "pay failed");
+
+        emit Resolved(caseId, winner, rationale);
+    }
+
     // if contract is past the review deadline, accept gets called
 
 
