@@ -1,7 +1,9 @@
 "use client"
 import Image from "next/image";
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAccount } from "wagmi";
+
 
 /*
 we are going to add the state 
@@ -11,11 +13,35 @@ we are going to add the state
 
 */
 
-export default function Home() {
-  const [payee, setPayee] = useState("");
-  const [specText, setSpecText] = useState("");
-  const [amountEth, setAmountEth] = useState(0);
+/*
+struct Case {
+    address payer;
+    address payee;
+    uint256 amount;
 
+    bytes32 specs;
+    bytes32 deliverables;
+    uint64 reviewDeadline;
+
+    Status status;
+}
+*/
+
+export default function Home() {
+  const { address } = useAccount();
+  console.log("payer address",address);
+
+  const [payer, setPayer] = useState("0x...");
+  const [payee, setPayee] = useState("");
+  const [amountEth, setAmountEth] = useState(0);
+  const [specText, setSpecText] = useState("");
+
+  useEffect(() => {
+    if (address) {
+      
+      setPayer(address); 
+    }
+  }, [address]);
 
 
   return (
@@ -37,30 +63,39 @@ export default function Home() {
             Baby Bitcoin
           </h1>
           <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Create a contract
+            Create Contract
           </p>
 
-          <div className="w-full" >
-            <div className="w-full flex flex-row gap-8 justify-between ">
-
-              <div className="flex flex-col w-full gap-8 " >
-                <input className="bg-gray-100 p-2 rounded-md" value={specText} onChange={(e) => setSpecText(e.target.value)} placeholder="payer address (you)" />
-                <input className="bg-gray-100 w-full p-2 rounded-md" value={payee} onChange={(e) => setPayee(e.target.value)} placeholder="payee address 0x..." />
-                <input className="bg-gray-100 p-2 rounded-md" type="number" value={amountEth} onChange={(e) => setAmountEth(Number(e.target.value))} placeholder="amount in ETH"  />
+          <div className="w-full">
+            <div className="w-full flex flex-row gap-4 justify-between mb-8 " style={{ minHeight: 280 }}>
+              <div className="flex flex-col w-full gap-2 mb-0  justify-between">
+                <label className="block font-medium text-gray-700 dark:text-zinc-300">
+                  Payer Address (you)
+                </label>
+                <input className="bg-gray-100 p-2 text-gray-400 rounded-md" value={payer} disabled placeholder="payer address (you)" />
+                <label className="block  font-medium text-gray-700 dark:text-zinc-300">
+                  Payee Address
+                </label>
+                <input className="bg-gray-100 w-full p-2 rounded-md" value={payee} onChange={(e) => setPayee(e.target.value as `0x${string}`)} placeholder="0x..." />
+                <label className="block  font-medium text-gray-700 dark:text-zinc-300">
+                  Amount in ETH
+                </label>
+                <input className="bg-gray-100 p-2 rounded-md" type="number" value={amountEth} onChange={(e) => setAmountEth(Number(e.target.value) as number)} placeholder="amount in ETH"  />
               </div>
 
-              <div className="w-full ">
+              <div className="w-full flex flex-col h-[280px]">
+                <label className="block font-medium text-gray-700 dark:text-zinc-300 mb-2">
+                  Specs of the Contract
+                </label>
                 <textarea
-                  className="bg-gray-100 p-2 rounded-md h-full w-full resize-none"
+                  className="bg-gray-100 p-2 rounded-md w-full flex-1 resize-none"
                   placeholder="specs of the contract- terms, conditions, etc."
-                  rows={4}
+                  value={specText} onChange={(e) => setSpecText(e.target.value)} 
                 />
               </div>
-
             </div>
-            <button className="bg-blue-500 text-white p-2 font-bold rounded-md mt-8">Create Contract</button>
+            <button className="bg-blue-500 text-white p-2 font-bold rounded-md">Create Contract</button>
           </div>
-
 
 
         </div>
