@@ -1,0 +1,13 @@
+{
+  "specText": "Build a simple landing page with 3 sections (Hero, Features, FAQ). Must be mobile responsive. Must match the provided copy exactly.",
+  "deliverablesText": "Deployed to https://example.com and repo at https://github.com/example/repo. Includes screenshots in /screenshots.",
+  "payerClaim": "Mobile layout breaks on iPhone Safari and copy doesn't match.",
+  "payeeClaim": "Meets actually does spec; mobile was tested; copy matches the latest doc.",
+  "extraLinks": [
+    "https://example.com/screenshot-1.png",
+    "https://example.com/screenshot-2.png"
+  ]
+}
+
+
+

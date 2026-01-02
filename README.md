@@ -55,3 +55,100 @@ After setting the variable, you can run the deployment with the Sepolia network:
 ```shell
 npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
 ```
+
+## AI Judge (OpenAI arbitration) — MVP script
+
+This repo includes a minimal “AI Judge” runner that:
+- Watches for `DisputeOpened(caseId)` events
+- Loads local evidence from `./evidence/case-<id>.json`
+- Calls OpenAI to pick a winner (`payer` or `payee`)
+- Hashes the rationale to `bytes32`, signs the EIP-712 verdict with the `aiJudge` key
+- Submits `resolveDispute(...)` on-chain
+
+### Prereqs
+
+- The deployed `EscrowV01` contract address
+- The `aiJudge` private key (must be funded for gas on that network)
+- An OpenAI API key
+
+### Environment variables
+
+- Recommended: copy `env.example` to `.env` and fill it in.
+
+- `ESCROW_ADDRESS`: deployed `EscrowV01` address
+- `OPENAI_API_KEY`: OpenAI key used for arbitration
+- `OPENAI_MODEL` (optional): defaults to `gpt-4o-mini`
+- `EVIDENCE_DIR` (optional): defaults to `./evidence`
+- `LOOKBACK_BLOCKS` (optional): defaults to `5000` (initial scan window)
+
+### Evidence files (local MVP)
+
+Create one file per disputed case:
+- `evidence/case-0.json`
+- `evidence/case-1.json`
+- etc.
+
+The script does **not** enforce a schema; it sends the JSON blob to the LLM. A reasonable shape:
+
+```json
+{
+  "specText": "What was promised",
+  "deliverablesText": "What was delivered (links, descriptions)",
+  "payerClaim": "Why payer thinks it failed",
+  "payeeClaim": "Why payee thinks it succeeded",
+  "extraLinks": ["https://...", "https://..."]
+}
+```
+
+### Run once (process current disputes and exit)
+
+```shell
+cp env.example .env
+
+ESCROW_ADDRESS=0xYourEscrowAddress \
+OPENAI_API_KEY=your_key \
+npx hardhat run --network sepolia scripts/ai-judge.ts
+```
+
+### Run in watch mode
+
+```shell
+cp env.example .env
+
+ESCROW_ADDRESS=0xYourEscrowAddress \
+OPENAI_API_KEY=your_key \
+npx hardhat run --network sepolia scripts/ai-judge.ts --watch --pollSeconds=5
+```
+
+### Deploy EscrowV01 (prints the escrow address)
+
+Local hardhat (quick sanity deploy):
+
+```shell
+npx hardhat run scripts/deploy-escrow.ts
+```
+
+### Local end-to-end demo (deploy + dispute + OpenAI + resolve)
+
+This runs everything against Hardhat’s in-memory local chain (no funded accounts needed).
+
+```shell
+cp env.example .env
+# Fill OPENAI_API_KEY in .env
+
+npx hardhat run scripts/local-demo.ts
+```
+
+Sepolia (requires `SEPOLIA_RPC_URL` + `SEPOLIA_PRIVATE_KEY` configured in Hardhat):
+
+```shell
+cp env.example .env
+# Fill SEPOLIA_RPC_URL and SEPOLIA_PRIVATE_KEY in .env
+
+npx hardhat run --network sepolia scripts/deploy-escrow.ts
+```
+
+### Notes / safety
+
+- The script will refuse to run unless the **first signer** for the selected Hardhat network matches `escrow.aiJudge()`.
+- For MVP, evidence is local. Later you can swap `loadEvidence()` to fetch from a hosted JSON endpoint.
