@@ -37,10 +37,7 @@ export default function Home() {
   const [specText, setSpecText] = useState("");
 
   useEffect(() => {
-    if (address) {
-      
-      setPayer(address); 
-    }
+    if (address) setPayer(address ); 
   }, [address]);
 
 
