@@ -2,8 +2,9 @@
 import Image from "next/image";
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useEffect, useState } from "react";
-import { useAccount } from "wagmi";
-
+import { useAccount, useWriteContract } from "wagmi";
+import { parseEther } from "viem";
+import { ESCROW_ABI, ESCROW_ADDRESS, textToBytes32Hash } from "../lib/escrow"; // adjust import if needed
 
 /*
 we are going to add the state 
@@ -29,7 +30,8 @@ struct Case {
 
 export default function Home() {
   const { address } = useAccount();
-  console.log("payer address",address);
+  const { writeContract, isPending, error } = useWriteContract();
+
 
   const [payer, setPayer] = useState("0x...");
   const [payee, setPayee] = useState("");
@@ -37,8 +39,23 @@ export default function Home() {
   const [specText, setSpecText] = useState("");
 
   useEffect(() => {
-    if (address) setPayer(address ); 
+    if (address) setPayer(address);
   }, [address]);
+
+  const onCreate = async () => {
+    if (!payee) return alert("Enter payee address");
+    if (!specText) return alert("Enter specs");
+    if (!amountEth || amountEth <= 0) return alert("Enter amount");
+
+    writeContract({
+      address: ESCROW_ADDRESS,
+      abi: ESCROW_ABI,
+      functionName: "createCase",
+      args: [payee as `0x${string}`, textToBytes32Hash(specText)],
+      value: parseEther(String(amountEth)),
+    });
+  };
+
 
 
   return (
@@ -69,7 +86,7 @@ export default function Home() {
                 <label className="block font-medium text-gray-700 dark:text-zinc-300">
                   Payer Address (you)
                 </label>
-                <input className="bg-gray-100 p-2 text-gray-400 rounded-md" value={payer} disabled placeholder="payer address (you)" />
+                <input className="bg-gray-100 p-2 text-gray-400 rounded-md" value={payer.slice(0, 6) + "..." + payer.slice(-4)} disabled placeholder="payer address (you)" />
                 <label className="block  font-medium text-gray-700 dark:text-zinc-300">
                   Payee Address
                 </label>
@@ -77,7 +94,7 @@ export default function Home() {
                 <label className="block  font-medium text-gray-700 dark:text-zinc-300">
                   Amount in ETH
                 </label>
-                <input className="bg-gray-100 p-2 rounded-md" type="number" value={amountEth} onChange={(e) => setAmountEth(Number(e.target.value) as number)} placeholder="amount in ETH"  />
+                <input className="bg-gray-100 p-2 rounded-md" type="number" value={amountEth} onChange={(e) => setAmountEth(Number(e.target.value) as number)} placeholder="amount in ETH" />
               </div>
 
               <div className="w-full flex flex-col h-[280px]">
@@ -87,11 +104,19 @@ export default function Home() {
                 <textarea
                   className="bg-gray-100 p-2 rounded-md w-full flex-1 resize-none"
                   placeholder="specs of the contract- terms, conditions, etc."
-                  value={specText} onChange={(e) => setSpecText(e.target.value)} 
+                  value={specText} onChange={(e) => setSpecText(e.target.value)}
                 />
               </div>
             </div>
-            <button className="bg-blue-500 text-white p-2 font-bold rounded-md">Create Contract</button>
+            <button
+              className="bg-blue-500 text-white p-2 font-bold rounded-md"
+              onClick={onCreate}
+              disabled={isPending}
+            >
+              {isPending ? "Sending..." : "Create Contract"}
+            </button>
+
+            {error && <pre className="mt-4 text-red-500">{error.message}</pre>}
           </div>
 
 
