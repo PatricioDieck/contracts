@@ -109,7 +109,12 @@ export default function Home() {
           <h2 className="text-lg font-semibold mb-3 dark:text-white">Cases ({Number(nextCaseId ?? 0n)})</h2>
           <div className="flex flex-col-reverse gap-3">
             {(casesData ?? []).map((r, idx) => (
-              r?.status === "success" && <CaseCard key={idx} caseId={idx} raw={r.result as readonly unknown[]} />
+              r?.status === "success" && <CaseCard 
+              key={idx} 
+              caseId={idx} 
+              raw={r.result as readonly unknown[]} 
+              onAction={() => { refetchNextCaseId(); refetchCases(); }}
+            />
             ))}
           </div>
         </div>
