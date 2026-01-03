@@ -1,10 +1,11 @@
 "use client"
 import Image from "next/image";
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useEffect, useState } from "react";
-import { useAccount, useWriteContract } from "wagmi";
-import { parseEther } from "viem";
+import { useEffect, useMemo, useState } from "react";
+import { useAccount, useReadContract, useReadContracts, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
+import { formatEther, parseEther } from "viem";
 import { ESCROW_ABI, ESCROW_ADDRESS, textToBytes32Hash } from "../lib/escrow"; // adjust import if needed
+import { CaseCard } from "../components/CaseCard";
 
 /*
 we are going to add the state 
@@ -30,7 +31,43 @@ struct Case {
 
 export default function Home() {
   const { address } = useAccount();
-  const { writeContract, isPending, error } = useWriteContract();
+  const { data: txHash, writeContract, isPending, error } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
+    hash: txHash,
+  });
+
+  // Read how many cases exist (ids are 0..nextCaseId-1)
+  const {
+    data: nextCaseId,
+    refetch: refetchNextCaseId,
+    isLoading: nextCaseIdLoading,
+    error: nextCaseIdError,
+  } = useReadContract({
+    address: ESCROW_ADDRESS,
+    abi: ESCROW_ABI,
+    functionName: "nextCaseId",
+  });
+
+  const caseIds = useMemo(() => {
+    const n = Number(nextCaseId ?? 0n);
+    if (!Number.isFinite(n) || n <= 0) return [];
+    return Array.from({ length: n }, (_, i) => BigInt(i));
+  }, [nextCaseId]);
+
+  const {
+    data: casesData,
+    refetch: refetchCases,
+    isLoading: casesLoading,
+    error: casesError,
+  } = useReadContracts({
+    contracts: caseIds.map((id) => ({
+      address: ESCROW_ADDRESS,
+      abi: ESCROW_ABI,
+      functionName: "cases",
+      args: [id],
+    })),
+    allowFailure: true,
+  });
 
 
   const [payer, setPayer] = useState("0x...");
@@ -56,7 +93,12 @@ export default function Home() {
     });
   };
 
-
+  useEffect(() => {
+    if (!isSuccess) return;
+    // After a successful createCase tx, refresh list
+    refetchNextCaseId();
+    refetchCases();
+  }, [isSuccess, refetchNextCaseId, refetchCases]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
@@ -111,12 +153,49 @@ export default function Home() {
             <button
               className="bg-blue-500 text-white p-2 font-bold rounded-md"
               onClick={onCreate}
-              disabled={isPending}
+              disabled={isPending || isConfirming}
             >
-              {isPending ? "Sending..." : "Create Contract"}
+              {isPending ? "Wallet..." : isConfirming ? "Confirming..." : "Create Contract"}
             </button>
 
             {error && <pre className="mt-4 text-red-500">{error.message}</pre>}
+
+            <div className="mt-10 w-full">
+              <h2 className="text-xl font-semibold text-black dark:text-zinc-50">
+                Existing Cases
+              </h2>
+
+              {(nextCaseIdError || casesError) && (
+                <pre className="mt-2 text-red-500 text-xs">
+                  {String(nextCaseIdError ?? casesError)}
+                </pre>
+              )}
+
+              <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+                Total: {nextCaseIdLoading ? "..." : Number(nextCaseId ?? 0n)}
+              </div>
+
+              {casesLoading && caseIds.length > 0 && (
+                <div className="mt-3 text-sm text-zinc-600 dark:text-zinc-400">
+                  Loading cases...
+                </div>
+              )}
+
+              <div className="mt-4 flex gap-3 flex-col-reverse">
+                {(casesData ?? []).map((r, idx) => {
+                  console.log("case result", idx, r.result);
+                  if (!r || r.status !== "success") return null;
+
+                  return (
+                    <CaseCard
+                      key={idx}
+                      caseId={idx}
+                      raw={r.result as unknown as readonly unknown[] | Record<string, unknown>}
+                    />
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
 
