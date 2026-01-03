@@ -7,12 +7,15 @@
 //   );
 // }
 
-const L = ["payer", "payee", "amount", "specs", "deliverables", "reviewDeadline", "status"];
+const L = ["payer", "payee", "amount", "specs", "deliverables", "reviewDeadline"];
+const STATUS = ["Funded", "Submitted", "Disputed", "Resolved"];
+
 
 export function CaseCard({ caseId, raw }: { caseId: number; raw: readonly unknown[] }) {
   return (
     <div className="border p-2">
       <b>#{caseId}</b>
+      <div className="uppercase  text-gray-500">Status: {STATUS[Number(raw[6] ?? 0)]}</div>
       {L.map((l, i) => <div key={l} className="text-sm">{l}: {String(raw[i] ?? "")}</div>)}
     </div>
   );
