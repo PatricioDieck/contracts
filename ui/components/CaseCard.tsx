@@ -3,7 +3,8 @@ import { useState } from "react";
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { ESCROW_ABI, ESCROW_ADDRESS, textToBytes32Hash } from "../lib/escrow";
 
-const L = ["payer", "payee", "amount", "specs", "deliverables", "reviewDeadline", "status"];
+// Struct order: payer, payee, judge, amount, specs, deliverables, reviewDeadline, status
+const L = ["payer", "payee", "judge", "amount", "specs", "deliverables", "reviewDeadline", "status"];
 const STATUS = ["Funded", "Submitted", "Disputed", "Resolved"];
 
 export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: readonly unknown[]; onAction?: () => void }) {
@@ -15,7 +16,7 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
 
   const payer = raw[0] as string;
   const payee = raw[1] as string;
-  const status = Number(raw[6] ?? 0);
+  const status = Number(raw[7] ?? 0); // status is now at index 7
 
   const isPayer = address?.toLowerCase() === payer?.toLowerCase();
   const isPayee = address?.toLowerCase() === payee?.toLowerCase();

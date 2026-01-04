@@ -12,12 +12,13 @@ async function main() {
   console.log("EscrowV01 deployed to:", escrowAddress);
 
   // Helper to create a case
-  const createCase = async (payerIdx: number, payeeIdx: number, amountEth: string, specs: string) => {
+  const createCase = async (payerIdx: number, payeeIdx: number, amountEth: string, specs: string, judgeIdx: number) => {
     const payer = signers[payerIdx];
     const payee = signers[payeeIdx];
+    const judge = signers[judgeIdx];
     const specsHash = ethers.keccak256(ethers.toUtf8Bytes(specs));
     
-    const tx = await Escrow.connect(payer).createCase(payee.address, specsHash, {
+    const tx = await Escrow.connect(payer).createCase(payee.address, specsHash, judge.address, {
       value: ethers.parseEther(amountEth),
     });
     await tx.wait();
@@ -55,23 +56,23 @@ async function main() {
   console.log("\n--- Creating test cases ---\n");
 
   // Case 0: Funded (no deliverable yet)
-  await createCase(0, 1, "0.5", "Build a landing page");
+  await createCase(0, 1, "0.5", "Build a landing page", 0);
 
   // Case 1: Submitted (waiting for payer review)
-  const case1 = await createCase(0, 2, "1.0", "Design a logo");
+  const case1 = await createCase(0, 2, "1.0", "Design a logo", 0);
   await submitDeliverable(case1, 2, "Logo v1 delivered");
 
   // Case 2: Submitted (different payer/payee)
-  const case2 = await createCase(1, 3, "0.25", "Write documentation");
+  const case2 = await createCase(1, 3, "0.25", "Write documentation", 0);
   await submitDeliverable(case2, 3, "Docs completed");
 
   // Case 3: Resolved (accepted)
-  const case3 = await createCase(2, 4, "0.75", "API integration");
+  const case3 = await createCase(2, 4, "0.75", "API integration", 0);
   await submitDeliverable(case3, 4, "API working");
   await acceptCase(case3, 2);
 
   // Case 4: Disputed (waiting for AI resolution)
-  const case4 = await createCase(3, 5, "2.0", "Smart contract audit");
+  const case4 = await createCase(3, 5, "2.0", "Smart contract audit", 0);
   await submitDeliverable(case4, 5, "Audit report submitted");
   await disputeCase(case4, 3);
 

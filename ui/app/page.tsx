@@ -3,7 +3,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useEffect, useMemo, useState } from "react";
 import { useAccount, useReadContract, useReadContracts, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { parseEther } from "viem";
-import { ESCROW_ABI, ESCROW_ADDRESS, textToBytes32Hash } from "../lib/escrow";
+import { ESCROW_ABI, ESCROW_ADDRESS, AI_JUDGE_ADDRESS, textToBytes32Hash } from "../lib/escrow";
 import { CaseCard } from "../components/CaseCard";
 
 /*
@@ -60,11 +60,12 @@ export default function Home() {
 
   const onCreate = () => {
     if (!payee || !specText || !amountEth) return alert("Fill all fields");
+    if (!AI_JUDGE_ADDRESS) return alert("AI Judge address not configured");
     writeContract({
       address: ESCROW_ADDRESS,
       abi: ESCROW_ABI,
       functionName: "createCase",
-      args: [payee as `0x${string}`, textToBytes32Hash(specText)],
+      args: [payee as `0x${string}`, textToBytes32Hash(specText), AI_JUDGE_ADDRESS],
       value: parseEther(amountEth),
     });
   };

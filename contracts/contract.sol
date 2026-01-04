@@ -15,12 +15,11 @@ contract EscrowV01 is ReentrancyGuard {
     struct Case {
         address payer;
         address payee;
+        address judge;      // AI resolver agreed upon at creation
         uint256 amount;
-
         bytes32 specs;
         bytes32 deliverables;
         uint64 reviewDeadline;
-
         Status status;
     }
 
@@ -37,6 +36,7 @@ contract EscrowV01 is ReentrancyGuard {
         uint256 indexed caseId,
         address indexed payer,
         address indexed payee,
+        address judge,
         uint256 amount,
         bytes32 specs
     );
@@ -53,11 +53,17 @@ contract EscrowV01 is ReentrancyGuard {
         bytes32 rationale
     );
 
+    /// @notice Create a new escrow case
+    /// @param payee The address that will receive funds if work is accepted
+    /// @param specs Hash of the contract specifications
+    /// @param judge The AI agent address that can resolve disputes
     function createCase(
         address payee,
-        bytes32 specs
+        bytes32 specs,
+        address judge
     ) external payable returns (uint256 caseId) {
         require(payee != address(0), "bad payee");
+        require(judge != address(0), "bad judge");
         require(msg.value > 0, "no funds");
         require(specs != bytes32(0), "bad spec");
 
@@ -65,6 +71,7 @@ contract EscrowV01 is ReentrancyGuard {
         cases[caseId] = Case({
             payer: msg.sender,
             payee: payee,
+            judge: judge,
             amount: msg.value,
             specs: specs,
             deliverables: bytes32(0),
@@ -72,23 +79,20 @@ contract EscrowV01 is ReentrancyGuard {
             status: Status.Funded
         });
 
-        emit CaseCreated(caseId, msg.sender, payee, msg.value, specs);
+        emit CaseCreated(caseId, msg.sender, payee, judge, msg.value, specs);
     }
 
+    /// @notice Payee submits their deliverable
     function submitDeliverable(
         uint256 caseId,
         bytes32 deliverables,
         uint64 reviewWindowSeconds
     ) external {
         Case storage c = cases[caseId];
-        require(
-            c.status == Status.Funded,
-            "Wrong status- deliverables are either already submitted or resolved"
-        );
+        require(c.status == Status.Funded, "wrong status");
         require(msg.sender == c.payee, "only payee");
         require(deliverables != bytes32(0), "bad deliverables");
 
-        //Effects (CEI)
         c.deliverables = deliverables;
         c.status = Status.Submitted;
 
@@ -99,6 +103,7 @@ contract EscrowV01 is ReentrancyGuard {
         emit DeliverableSubmitted(caseId, deliverables, c.reviewDeadline);
     }
 
+    /// @notice Payer accepts the deliverable, releasing funds to payee
     function accept(uint256 caseId) external nonReentrant {
         Case storage c = cases[caseId];
         require(c.status == Status.Submitted, "wrong status");
@@ -117,10 +122,8 @@ contract EscrowV01 is ReentrancyGuard {
         emit Accepted(caseId);
     }
 
-    // MVP rule: only payer can dispute, only after deliverables is submitted. relax/extend later
-    function openDispute(
-        uint256 caseId
-    ) external {
+    /// @notice Payer opens a dispute (only after deliverable submitted)
+    function openDispute(uint256 caseId) external {
         Case storage c = cases[caseId];
         require(c.status == Status.Submitted, "wrong status");
         require(msg.sender == c.payer, "only payer");
@@ -130,9 +133,45 @@ contract EscrowV01 is ReentrancyGuard {
         emit DisputeOpened(caseId);
     }
 
-    // if dispute is open, AI resolve function gets called automatically 
-    // if contract is past the review deadline, accept gets called
+    /// @notice AI judge resolves the dispute
+    /// @param caseId The case to resolve
+    /// @param winner Either payer (refund) or payee (release)
+    /// @param rationale Hash of AI's reasoning
+    function resolve(
+        uint256 caseId,
+        address winner,
+        bytes32 rationale
+    ) external nonReentrant {
+        Case storage c = cases[caseId];
+        require(c.status == Status.Disputed, "wrong status");
+        require(msg.sender == c.judge, "only judge");
+        require(winner == c.payer || winner == c.payee, "invalid winner");
+        require(c.amount > 0, "empty amount");
 
+        c.status = Status.Resolved;
+        uint256 amt = c.amount;
+        c.amount = 0;
 
+        (bool ok, ) = winner.call{value: amt}("");
+        require(ok, "pay failed");
 
+        emit Resolved(caseId, winner, rationale);
+    }
+
+    /// @notice Auto-resolve to payee if review deadline passed without dispute
+    function autoResolve(uint256 caseId) external nonReentrant {
+        Case storage c = cases[caseId];
+        require(c.status == Status.Submitted, "wrong status");
+        require(block.timestamp > c.reviewDeadline, "too early");
+        require(c.amount > 0, "empty amount");
+
+        c.status = Status.Resolved;
+        uint256 amt = c.amount;
+        c.amount = 0;
+
+        (bool ok, ) = c.payee.call{value: amt}("");
+        require(ok, "pay failed");
+
+        emit Accepted(caseId); // Reuse Accepted event for auto-resolution
+    }
 }
