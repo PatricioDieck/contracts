@@ -93,7 +93,6 @@ Note: Since you only have hashes, make a reasonable judgment. In a production sy
     });
 
     const aiResponse = JSON.parse(completion.choices[0].message.content || "{}");
-    console.log("AI response:", aiResponse);
     const winnerRole = aiResponse.winner as "payer" | "payee";
     const rationale = aiResponse.rationale as string;
 
