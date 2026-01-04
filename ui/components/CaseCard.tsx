@@ -13,6 +13,9 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
   const [deliverableText, setDeliverableText] = useState("");
+  const [aiResolving, setAiResolving] = useState(false);
+  const [aiResult, setAiResult] = useState<{ winner: string; rationale: string } | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const payer = raw[0] as string;
   const payee = raw[1] as string;
@@ -23,6 +26,7 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
 
   const canAcceptOrDispute = isPayer && status === 1; // Submitted
   const canSubmitDeliverable = isPayee && status === 0; // Funded
+  const canResolveWithAI = status === 2; // Disputed
 
   const handleAccept = () => {
     writeContract({
@@ -51,6 +55,26 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
       functionName: "submitDeliverable",
       args: [BigInt(caseId), textToBytes32Hash(deliverableText), reviewWindow],
     });
+  };
+
+  const handleResolveWithAI = async () => {
+    setAiResolving(true);
+    setAiError(null);
+    setAiResult(null);
+    try {
+      const res = await fetch(`/api/resolve?caseId=${caseId}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setAiError(data.error || "AI resolution failed");
+      } else {
+        setAiResult({ winner: data.winner, rationale: data.rationale });
+        if (onAction) onAction(); // Refresh case data
+      }
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setAiResolving(false);
+    }
   };
 
   // Trigger refresh after success
@@ -99,6 +123,29 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
           >
             {isPending || isConfirming ? "..." : "Dispute"}
           </button>
+        </div>
+      )}
+
+      {canResolveWithAI && (
+        <div className="mt-3">
+          <button
+            className="bg-purple-600 text-white px-3 py-2 rounded text-sm font-medium w-full"
+            onClick={handleResolveWithAI}
+            disabled={aiResolving}
+          >
+            {aiResolving ? "🤖 AI is reviewing..." : "🤖 Resolve with AI"}
+          </button>
+          {aiResult && (
+            <div className="mt-2 p-2 bg-green-100 rounded text-sm">
+              <div className="font-medium">Winner: {aiResult.winner}</div>
+              <div className="text-gray-600">{aiResult.rationale}</div>
+            </div>
+          )}
+          {aiError && (
+            <div className="mt-2 p-2 bg-red-100 rounded text-sm text-red-700">
+              {aiError}
+            </div>
+          )}
         </div>
       )}
     </div>
