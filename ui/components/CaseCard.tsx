@@ -1,6 +1,7 @@
 "use client";
+import { useState } from "react";
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
-import { ESCROW_ABI, ESCROW_ADDRESS } from "../lib/escrow";
+import { ESCROW_ABI, ESCROW_ADDRESS, textToBytes32Hash } from "../lib/escrow";
 
 const L = ["payer", "payee", "amount", "specs", "deliverables", "reviewDeadline", "status"];
 const STATUS = ["Funded", "Submitted", "Disputed", "Resolved"];
@@ -10,10 +11,17 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
   const { writeContract, data: txHash, isPending } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
+  const [deliverableText, setDeliverableText] = useState("");
+
   const payer = raw[0] as string;
+  const payee = raw[1] as string;
   const status = Number(raw[6] ?? 0);
+
   const isPayer = address?.toLowerCase() === payer?.toLowerCase();
+  const isPayee = address?.toLowerCase() === payee?.toLowerCase();
+
   const canAcceptOrDispute = isPayer && status === 1; // Submitted
+  const canSubmitDeliverable = isPayee && status === 0; // Funded
 
   const handleAccept = () => {
     writeContract({
@@ -33,6 +41,17 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
     });
   };
 
+  const handleSubmitDeliverable = () => {
+    if (!deliverableText) return alert("Enter deliverable description");
+    const reviewWindow = BigInt(7 * 24 * 60 * 60); // 7 days in seconds
+    writeContract({
+      address: ESCROW_ADDRESS,
+      abi: ESCROW_ABI,
+      functionName: "submitDeliverable",
+      args: [BigInt(caseId), textToBytes32Hash(deliverableText), reviewWindow],
+    });
+  };
+
   // Trigger refresh after success
   if (isSuccess && onAction) onAction();
 
@@ -44,6 +63,24 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
           {l}: {l === "status" ? STATUS[Number(raw[i])] ?? String(raw[i]) : String(raw[i] ?? "")}
         </div>
       ))}
+
+      {canSubmitDeliverable && (
+        <div className="mt-3 flex flex-col gap-2">
+          <input
+            className="bg-gray-100 p-2 rounded text-sm"
+            placeholder="Describe your deliverable..."
+            value={deliverableText}
+            onChange={(e) => setDeliverableText(e.target.value)}
+          />
+          <button
+            className="bg-blue-500 text-white px-3 py-1 rounded text-sm font-medium"
+            onClick={handleSubmitDeliverable}
+            disabled={isPending || isConfirming}
+          >
+            {isPending || isConfirming ? "..." : "Submit Deliverable"}
+          </button>
+        </div>
+      )}
 
       {canAcceptOrDispute && (
         <div className="flex gap-2 mt-3">
