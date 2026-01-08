@@ -1,9 +1,9 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { useCompletion } from "@ai-sdk/react";
 import { ESCROW_ABI, ESCROW_ADDRESS, textToBytes32Hash } from "../lib/escrow";
 
-// Struct order: payer, payee, judge, amount, specs, deliverables, reviewDeadline, status
 const L = ["payer", "payee", "judge", "amount", "specs", "deliverables", "reviewDeadline", "status"];
 const STATUS = ["Funded", "Submitted", "Disputed", "Resolved"];
 
@@ -15,11 +15,32 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
   const [deliverableText, setDeliverableText] = useState("");
   const [showDisputeConfirm, setShowDisputeConfirm] = useState(false);
   const [disputeTriggered, setDisputeTriggered] = useState(false);
-  const [aiResolving, setAiResolving] = useState(false);
-  const [aiResult, setAiResult] = useState<{ winner: string; rationale: string } | null>(null);
-  const [aiError, setAiError] = useState<string | null>(null);
   
+  const streamContainerRef = useRef<HTMLDivElement>(null);
   const hasTriggeredAI = useRef(false);
+
+  // Vercel AI SDK useCompletion hook - handles all streaming state
+  const { 
+    completion,      // The streamed text
+    isLoading,       // Is currently streaming
+    error,           // Any error that occurred
+    complete,        // Function to trigger completion
+  } = useCompletion({
+    api: "/api/resolve",
+    streamProtocol: "text", // Use text protocol to match toTextStreamResponse()
+    onFinish: () => {
+      // Contract call happens server-side in onFinish
+      // Just refresh the UI after a delay
+      setTimeout(() => {
+        onAction?.();
+      }, 2000);
+    },
+    onError: (err) => {
+      console.error("AI resolution error:", err);
+      setDisputeTriggered(false);
+      reset();
+    },
+  });
 
   const payer = raw[0] as string;
   const payee = raw[1] as string;
@@ -31,39 +52,27 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
   const canAcceptOrDispute = isPayer && status === 1;
   const canSubmitDeliverable = isPayee && status === 0;
 
-  const triggerAIResolution = useCallback(async () => {
-    setAiResolving(true);
-    setAiError(null);
-    setAiResult(null);
-    
-    // Small delay for dramatic effect
-    await new Promise(r => setTimeout(r, 500));
-    
-    try {
-      const res = await fetch(`/api/resolve?caseId=${caseId}`);
-      const data = await res.json();
-      if (!res.ok) {
-        setAiError(data.error || "AI resolution failed");
-      } else {
-        setAiResult({ winner: data.winner, rationale: data.rationale });
-        if (onAction) onAction();
-      }
-    } catch (err) {
-      setAiError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setAiResolving(false);
-      setDisputeTriggered(false);
-      reset();
-    }
-  }, [caseId, onAction, reset]);
+  // Parse winner from completion text
+  const getWinner = () => {
+    if (completion.includes("DECISION: PAYEE WINS")) return "payee";
+    if (completion.includes("DECISION: PAYER WINS")) return "payer";
+    return null;
+  };
 
-  // Auto-trigger AI resolution after dispute transaction confirms
+  // Auto-scroll as text streams in
+  useEffect(() => {
+    if (streamContainerRef.current) {
+      streamContainerRef.current.scrollTop = streamContainerRef.current.scrollHeight;
+    }
+  }, [completion]);
+
+  // Trigger AI after dispute transaction confirms
   useEffect(() => {
     if (isSuccess && disputeTriggered && !hasTriggeredAI.current) {
       hasTriggeredAI.current = true;
-      triggerAIResolution();
+      complete(`caseId:${caseId}`);
     }
-  }, [isSuccess, disputeTriggered, triggerAIResolution]);
+  }, [isSuccess, disputeTriggered, caseId, complete]);
 
   const handleAccept = () => {
     writeContract({
@@ -74,9 +83,7 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
     });
   };
 
-  const handleDisputeClick = () => {
-    setShowDisputeConfirm(true);
-  };
+  const handleDisputeClick = () => setShowDisputeConfirm(true);
 
   const handleDisputeConfirm = () => {
     setShowDisputeConfirm(false);
@@ -92,69 +99,79 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
 
   const handleSubmitDeliverable = () => {
     if (!deliverableText) return alert("Enter deliverable description");
-    const reviewWindow = BigInt(7 * 24 * 60 * 60);
     writeContract({
       address: ESCROW_ADDRESS,
       abi: ESCROW_ABI,
       functionName: "submitDeliverable",
-      args: [BigInt(caseId), textToBytes32Hash(deliverableText), reviewWindow],
+      args: [BigInt(caseId), textToBytes32Hash(deliverableText), BigInt(7 * 24 * 60 * 60)],
     });
   };
 
   // Refresh on non-dispute success
   useEffect(() => {
-    if (isSuccess && !disputeTriggered && onAction) {
-      onAction();
-    }
+    if (isSuccess && !disputeTriggered && onAction) onAction();
   }, [isSuccess, disputeTriggered, onAction]);
 
-  // AI Resolution in progress - show dramatic UI
-  if (aiResolving) {
+  // AI streaming or complete state
+  if (isLoading || completion) {
+    const winner = getWinner();
+    const isComplete = !isLoading && winner;
+    
     return (
-      <div className="border-2 border-purple-500 p-6 rounded-lg bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-950 dark:to-indigo-950">
-        <div className="text-center">
-          <div className="text-4xl mb-4 animate-pulse">🤖</div>
-          <h3 className="text-lg font-bold text-purple-900 dark:text-purple-100 mb-2">
-            AI Judge is Reviewing
-          </h3>
-          <p className="text-sm text-purple-700 dark:text-purple-300 mb-4">
-            Analyzing contract specifications and deliverables...
-          </p>
-          <div className="flex justify-center gap-1">
-            <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-            <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-            <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+      <div className={`border-2 p-6 rounded-lg transition-all duration-500 ${
+        isComplete 
+          ? winner === "payee" 
+            ? "border-green-500 bg-green-50 dark:bg-green-950" 
+            : "border-orange-500 bg-orange-50 dark:bg-orange-950"
+          : "border-purple-500 bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-950 dark:to-indigo-950"
+      }`}>
+        <div className="flex items-center gap-3 mb-4">
+          <div className={`text-3xl ${isLoading ? "animate-pulse" : ""}`}>
+            {isComplete ? (winner === "payee" ? "✅" : "↩️") : "🤖"}
+          </div>
+          <div>
+            <h3 className="text-lg font-bold">
+              {isComplete ? `Case #${caseId} Resolved` : "AI Judge Analyzing..."}
+            </h3>
+            {isComplete && (
+              <div className={`text-sm font-bold ${
+                winner === "payee" ? "text-green-700 dark:text-green-300" : "text-orange-700 dark:text-orange-300"
+              }`}>
+                {winner === "payee" ? "Payee Wins" : "Payer Wins"}
+              </div>
+            )}
           </div>
         </div>
-      </div>
-    );
-  }
 
-  // AI Resolution complete - show result
-  if (aiResult) {
-    const winnerIsPayee = aiResult.winner === "payee";
-    return (
-      <div className={`border-2 p-6 rounded-lg ${winnerIsPayee ? "border-green-500 bg-green-50 dark:bg-green-950" : "border-orange-500 bg-orange-50 dark:bg-orange-950"}`}>
-        <div className="text-center mb-4">
-          <div className="text-4xl mb-2">{winnerIsPayee ? "✅" : "↩️"}</div>
-          <h3 className="text-lg font-bold mb-1">
-            Case #{caseId} Resolved
-          </h3>
-          <div className={`text-2xl font-bold ${winnerIsPayee ? "text-green-700 dark:text-green-300" : "text-orange-700 dark:text-orange-300"}`}>
-            {winnerIsPayee ? "Payee Wins" : "Payer Wins"}
+        <div 
+          ref={streamContainerRef}
+          className="bg-white dark:bg-zinc-900 rounded-lg p-4 border max-h-48 overflow-y-auto font-mono text-sm"
+        >
+          <div className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+            {completion}
+            {isLoading && <span className="inline-block w-2 h-4 bg-purple-500 animate-pulse ml-0.5" />}
           </div>
         </div>
-        <div className="bg-white dark:bg-zinc-900 rounded-lg p-4 border">
-          <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">AI Rationale</div>
-          <p className="text-sm text-gray-700 dark:text-gray-300 italic">&ldquo;{aiResult.rationale}&rdquo;</p>
-        </div>
+
         <div className="mt-4 text-center text-xs text-gray-500">
-          Funds automatically transferred to winner
+          {isLoading ? (
+            <span className="flex items-center justify-center gap-2">
+              <span className="w-2 h-2 bg-purple-500 rounded-full animate-ping" />
+              Analyzing contract...
+            </span>
+          ) : isComplete ? (
+            <span className="text-green-600 dark:text-green-400 font-medium">
+              ✓ Funds automatically transferred to winner
+            </span>
+          ) : (
+            "Waiting for decision..."
+          )}
         </div>
       </div>
     );
   }
 
+  // Default card view
   return (
     <div className="border p-4 rounded-lg bg-white dark:bg-zinc-900">
       <div className="flex justify-between items-start mb-3">
@@ -195,9 +212,7 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
 
       {canAcceptOrDispute && !showDisputeConfirm && (
         <div className="mt-4 pt-4 border-t">
-          <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-            Review the deliverable and decide:
-          </p>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Review the deliverable and decide:</p>
           <div className="flex gap-2">
             <button
               className="flex-1 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded font-medium transition-colors"
@@ -217,22 +232,19 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
         </div>
       )}
 
-      {/* Dispute Confirmation Modal */}
       {showDisputeConfirm && (
         <div className="mt-4 pt-4 border-t">
           <div className="bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-950 dark:to-indigo-950 rounded-lg p-4 border-2 border-purple-200 dark:border-purple-800">
             <div className="flex items-start gap-3">
               <div className="text-3xl">🤖</div>
               <div className="flex-1">
-                <h4 className="font-bold text-purple-900 dark:text-purple-100 mb-1">
-                  Initiate AI Arbitration
-                </h4>
+                <h4 className="font-bold text-purple-900 dark:text-purple-100 mb-1">Initiate AI Arbitration</h4>
                 <p className="text-sm text-purple-700 dark:text-purple-300 mb-3">
-                  An AI judge will immediately review the contract specifications and deliverables to make a <strong>final, binding decision</strong>. 
-                  Funds will be automatically transferred to the winner.
+                  An AI judge will review the contract and make a <strong>final, binding decision</strong>. 
+                  Watch in real-time as it analyzes your case.
                 </p>
                 <p className="text-xs text-purple-600 dark:text-purple-400 mb-4">
-                  ⚡ Resolution typically takes 5-10 seconds. No lawyers. No delays.
+                  ⚡ No lawyers. No delays. Resolution in seconds.
                 </p>
                 <div className="flex gap-2">
                   <button
@@ -256,10 +268,10 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
         </div>
       )}
 
-      {aiError && (
+      {error && (
         <div className="mt-4 p-3 bg-red-100 dark:bg-red-950 rounded-lg border border-red-300 dark:border-red-800">
           <div className="text-sm text-red-700 dark:text-red-300">
-            <strong>Resolution failed:</strong> {aiError}
+            <strong>Resolution failed:</strong> {error.message}
           </div>
         </div>
       )}

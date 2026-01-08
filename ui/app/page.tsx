@@ -59,7 +59,7 @@ export default function Home() {
   const [specText, setSpecText] = useState("");
 
   const onCreate = () => {
-    if (!payee || !specText || !amountEth) return alert("Fill all fields");
+    if (!payee || !specText || !amountEth) return alert("All contract fields are required");
     if (!AI_JUDGE_ADDRESS) return alert("AI Judge address not configured");
     writeContract({
       address: ESCROW_ADDRESS,
