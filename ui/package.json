@@ -4,11 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "cp ../.env.hardhat .env.local && next dev",
-    "dev:sepolia": "cp ../.env.sepolia .env.local && next dev",
-    "dev:mainnet": "cp ../.env.mainnet .env.local && next dev",
+
     "build": "next build",
-    "build:sepolia": "cp ../.env.sepolia .env.local && next build",
-    "build:mainnet": "cp ../.env.mainnet .env.local && next build",
     "start": "next start",
     "lint": "eslint"
   },
