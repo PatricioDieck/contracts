@@ -4,8 +4,10 @@
   "type": "module",
   "scripts": {
     "node": "hardhat node",
-    "deploy": "hardhat run scripts/deploy.ts --network localhost",
-    "seed": "hardhat run scripts/seed.ts --network localhost"
+    "deploy": "cp .env.hardhat ui/.env.local && hardhat run scripts/deploy.ts --network localhost",
+    "deploy:sepolia": "cp .env.sepolia ui/.env.local && hardhat run scripts/deploy.ts --network sepolia",
+    "deploy:mainnet": "cp .env.mainnet ui/.env.local && hardhat run scripts/deploy.ts --network mainnet",
+    "seed": "cp .env.hardhat ui/.env.local && hardhat run scripts/seed.ts --network localhost"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^4.0.3",
@@ -16,6 +18,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^22.19.3",
     "chai": "^5.3.3",
+    "dotenv": "^16.5.0",
     "ethers": "^6.16.0",
     "forge-std": "github:foundry-rs/forge-std#v1.9.4",
     "hardhat": "^3.1.2",

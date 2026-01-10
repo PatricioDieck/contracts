@@ -1,45 +1,53 @@
 import { NextRequest } from "next/server";
 import { createPublicClient, createWalletClient, http, keccak256, toBytes } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { hardhat } from "viem/chains";
+import { hardhat, sepolia, mainnet } from "viem/chains";
 import { streamText } from "ai";
 import { openai } from "@ai-sdk/openai";
 
 import EscrowArtifact from "../../../../artifacts/contracts/Contract.sol/EscrowV01.json";
 
 const ESCROW_ABI = EscrowArtifact.abi;
-const ESCROW_ADDRESS = process.env.NEXT_PUBLIC_ESCROW_ADDRESS as `0x${string}`;
-const AI_JUDGE_PRIVATE_KEY = process.env.AI_JUDGE_PRIVATE_KEY as `0x${string}`;
 
-const publicClient = createPublicClient({
-  chain: hardhat,
-  transport: http("http://127.0.0.1:8545"),
-});
+// Lazy getters - only called at runtime, not build time
+const chains = { hardhat, sepolia, mainnet };
+
+function getChain() {
+  const name = process.env.NEXT_PUBLIC_CHAIN as keyof typeof chains;
+  return chains[name];
+}
+
+function getPublicClient() {
+  return createPublicClient({
+    chain: getChain(),
+    transport: http(process.env.NEXT_PUBLIC_RPC_URL),
+  });
+}
 
 function getWalletClient() {
-  if (!AI_JUDGE_PRIVATE_KEY) throw new Error("AI_JUDGE_PRIVATE_KEY not set");
-  const account = privateKeyToAccount(AI_JUDGE_PRIVATE_KEY);
+  const key = process.env.AI_JUDGE_PRIVATE_KEY as `0x${string}`;
+  if (!key) throw new Error("AI_JUDGE_PRIVATE_KEY not set");
   return createWalletClient({
-    account,
-    chain: hardhat,
-    transport: http("http://127.0.0.1:8545"),
+    account: privateKeyToAccount(key),
+    chain: getChain(),
+    transport: http(process.env.NEXT_PUBLIC_RPC_URL),
   });
 }
 
 export async function POST(request: NextRequest) {
   const { prompt } = await request.json();
   
-  // Extract caseId from the prompt (format: "caseId:X")
   const caseIdMatch = prompt.match(/caseId:(\d+)/);
   if (!caseIdMatch) {
-    return new Response(JSON.stringify({ error: "caseId required in prompt" }), { status: 400 });
+    return new Response(JSON.stringify({ error: "caseId required" }), { status: 400 });
   }
   
   const caseId = BigInt(caseIdMatch[1]);
+  const escrowAddress = process.env.NEXT_PUBLIC_ESCROW_ADDRESS as `0x${string}`;
+  const publicClient = getPublicClient();
 
-  // Fetch case data from contract
   const caseData = await publicClient.readContract({
-    address: ESCROW_ADDRESS,
+    address: escrowAddress,
     abi: ESCROW_ABI,
     functionName: "cases",
     args: [caseId],
@@ -52,7 +60,7 @@ export async function POST(request: NextRequest) {
   const status = Number(caseData[7]);
 
   if (status !== 2) {
-    return new Response(JSON.stringify({ error: "Case is not in Disputed status" }), { status: 400 });
+    return new Response(JSON.stringify({ error: "Case not in Disputed status" }), { status: 400 });
   }
 
   const aiPrompt = `You are an AI arbitrator for a smart contract dispute. Analyze this case and provide your reasoning, then declare a winner. THIS IS MOCK DATA- PRETEND YOU RECIEVED A FULL CASE FILE!!!
@@ -90,7 +98,7 @@ Be concise but thoughtful. Your decision is final and binding.`;
       try {
         const walletClient = getWalletClient();
         const hash = await walletClient.writeContract({
-          address: ESCROW_ADDRESS,
+          address: escrowAddress,
           abi: ESCROW_ABI,
           functionName: "resolve",
           args: [caseId, winner, rationaleHash],
@@ -99,7 +107,7 @@ Be concise but thoughtful. Your decision is final and binding.`;
         await publicClient.waitForTransactionReceipt({ hash });
         console.log(`Case ${caseId} resolved. Winner: ${payeeWins ? "payee" : "payer"}, tx: ${hash}`);
       } catch (err) {
-        console.error("Failed to call resolve on contract:", err);
+        console.error("Failed to resolve:", err);
       }
     },
   });

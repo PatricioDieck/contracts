@@ -19,5 +19,8 @@
 # Hardhat coverage reports
 /coverage
 
+# Environment files (contain secrets)
 .env
-
+.env.hardhat
+.env.sepolia
+.env.mainnet
