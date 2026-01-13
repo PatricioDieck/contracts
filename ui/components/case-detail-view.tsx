@@ -87,7 +87,46 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
     }
   }, [isAcceptSuccess, isDisputeSuccess, isSubmitSuccess, refetchCase, toast])
 
-  if (!caseData) {
+  // Parse case data (safe even if caseData is null)
+  const raw = caseData as readonly unknown[] | null
+  const payer = raw?.[0] as string | undefined
+  const payee = raw?.[1] as string | undefined
+  const judge = raw?.[2] as string | undefined
+  const amount = raw?.[3] as bigint | undefined
+  const specs = raw?.[4] as string | undefined
+  const deliverables = raw?.[5] as string | undefined
+  const status = raw?.[7] ? Number(raw[7]) : undefined
+
+  const statusLabel = status !== undefined ? (STATUS_MAP[status] || "Funded") : undefined
+  const isPayer = address && payer ? address.toLowerCase() === payer.toLowerCase() : false
+  const isPayee = address && payee ? address.toLowerCase() === payee.toLowerCase() : false
+  // For testing: allow payer to submit if they're also the payee
+  const isSelfContract = payer && payee ? payer.toLowerCase() === payee.toLowerCase() : false
+  const role = isPayer ? "Payer" : isPayee ? "Payee" : null
+  
+  // Check if deliverables are empty (zero hash or empty string) - use deliverables before early return
+  const zeroHash = "0x0000000000000000000000000000000000000000000000000000000000000000"
+  const tempDeliverables = deliverables || ""
+  const hasDeliverables = tempDeliverables && tempDeliverables !== zeroHash && tempDeliverables !== "0x" && tempDeliverables.length > 2
+  
+  // Debug logging (must be before early return to follow Rules of Hooks)
+  useEffect(() => {
+    if (caseData && status !== undefined && statusLabel) {
+      console.log("Case Detail Debug:", {
+        caseId,
+        status,
+        statusLabel,
+        hasDeliverables,
+        deliverables: tempDeliverables,
+        isPayer,
+        isPayee,
+        isSelfContract,
+        role,
+      })
+    }
+  }, [caseId, status, statusLabel, hasDeliverables, tempDeliverables, isPayer, isPayee, isSelfContract, role, caseData])
+
+  if (!caseData || !payer || !payee || !judge || amount === undefined || status === undefined) {
     return (
       <div className="flex h-full items-center justify-center p-6">
         <Card>
@@ -101,40 +140,11 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
     )
   }
 
-  const raw = caseData as readonly unknown[]
-  const payer = raw[0] as string
-  const payee = raw[1] as string
-  const judge = raw[2] as string
-  const amount = raw[3] as bigint
-  const specs = raw[4] as string
-  const deliverables = raw[5] as string
-  const status = Number(raw[7] ?? 0)
-
-  const statusLabel = STATUS_MAP[status] || "Funded"
-  const isPayer = address?.toLowerCase() === payer.toLowerCase()
-  const isPayee = address?.toLowerCase() === payee.toLowerCase()
-  // For testing: allow payer to submit if they're also the payee
-  const isSelfContract = payer.toLowerCase() === payee.toLowerCase()
-  const role = isPayer ? "Payer" : isPayee ? "Payee" : null
-  
-  // Check if deliverables are empty (zero hash or empty string)
-  const zeroHash = "0x0000000000000000000000000000000000000000000000000000000000000000"
-  const hasDeliverables = deliverables && deliverables !== zeroHash && deliverables !== "0x" && deliverables.length > 2
-  
-  // Debug logging
-  useEffect(() => {
-    console.log("Case Detail Debug:", {
-      caseId,
-      status,
-      statusLabel,
-      hasDeliverables,
-      deliverables,
-      isPayer,
-      isPayee,
-      isSelfContract,
-      role,
-    })
-  }, [caseId, status, statusLabel, hasDeliverables, deliverables, isPayer, isPayee, isSelfContract, role])
+  // After early return, we know all values are defined
+  const finalStatusLabel = statusLabel!
+  const finalAmount = amount!
+  const finalSpecs = specs || ""
+  const finalDeliverables = deliverables || ""
 
   const handleAccept = () => {
     writeAccept({
@@ -187,9 +197,9 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <StatusBadge status={statusLabel} />
+            <StatusBadge status={finalStatusLabel} />
             <div className="text-right">
-              <div className="font-mono text-2xl font-bold">{formatEther(amount)} ETH</div>
+              <div className="font-mono text-2xl font-bold">{formatEther(finalAmount)} ETH</div>
               <div className="text-xs text-muted-foreground">Escrow Amount</div>
             </div>
           </div>
@@ -222,7 +232,7 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
             <CardTitle>Timeline</CardTitle>
           </CardHeader>
           <CardContent>
-            <TimelineStepper currentStatus={statusLabel} />
+            <TimelineStepper currentStatus={finalStatusLabel} />
           </CardContent>
         </Card>
 
@@ -233,7 +243,7 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
           </CardHeader>
           <CardContent>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              Hash: {specs.slice(0, 20)}... (Specifications stored on-chain as hash)
+              Hash: {finalSpecs.slice(0, 20)}... (Specifications stored on-chain as hash)
             </p>
           </CardContent>
         </Card>
@@ -257,12 +267,12 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
             ) : (
               <div className="space-y-4">
                 <div className="rounded-lg border border-border bg-muted/50 p-4">
-                  <div className="flex items-start gap-3">
+                    <div className="flex items-start gap-3">
                     <FileText className="h-5 w-5 text-muted-foreground mt-0.5" />
                     <div className="flex-1">
                       <p className="text-sm font-medium mb-1">Deliverables Submitted</p>
                       <p className="text-sm text-muted-foreground mb-2">
-                        Hash: <code className="font-mono text-xs">{deliverables.slice(0, 20)}...</code>
+                        Hash: <code className="font-mono text-xs">{finalDeliverables.slice(0, 20)}...</code>
                       </p>
                       <p className="text-xs text-muted-foreground">
                         Deliverables are stored on-chain as a hash. The AI judge will use this to evaluate the case.
@@ -288,7 +298,7 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
           <AIArbitrationPanel
             caseData={{
               id: caseId,
-              status: statusLabel,
+              status: finalStatusLabel,
             }}
             caseId={caseId}
             isActive={status === 2 || showAIPanel}
