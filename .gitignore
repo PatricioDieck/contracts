@@ -24,3 +24,5 @@
 .env.hardhat
 .env.sepolia
 .env.mainnet
+
+/ui/ui-mockups/
