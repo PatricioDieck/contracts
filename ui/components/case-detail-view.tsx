@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi"
-import { ArrowLeft, FileText, ImageIcon, Calendar, AlertCircle } from "lucide-react"
+import { useAccount, useWriteContract, useWaitForTransactionReceipt } from "wagmi"
+import { ArrowLeft, FileText, AlertCircle, Upload, X, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
@@ -22,34 +22,28 @@ import { AddressDisplay } from "@/components/address-display"
 import { TimelineStepper } from "@/components/timeline-stepper"
 import { AIArbitrationPanel } from "@/components/ai-arbitration-panel"
 import { ESCROW_ABI, ESCROW_ADDRESS, textToBytes32Hash } from "@/lib/escrow"
-import { formatEther } from "viem"
 import { useToast } from "@/hooks/use-toast"
-
-const STATUS_MAP: Record<number, "Funded" | "Submitted" | "Disputed" | "Resolved"> = {
-  0: "Funded",
-  1: "Submitted",
-  2: "Disputed",
-  3: "Resolved",
-}
+import { useCase } from "@/hooks/use-case"
+import { useQueryClient } from "@tanstack/react-query"
 
 export function CaseDetailView({ caseId }: { caseId: string }) {
   const router = useRouter()
   const { toast } = useToast()
   const { address } = useAccount()
+  const queryClient = useQueryClient()
   const [showDisputeDialog, setShowDisputeDialog] = useState(false)
   const [showSubmitForm, setShowSubmitForm] = useState(false)
   const [deliverableText, setDeliverableText] = useState("")
   const [showAIPanel, setShowAIPanel] = useState(false)
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [isUploading, setIsUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const caseIdBigInt = BigInt(caseId)
 
-  // Fetch case data
-  const { data: caseData, refetch: refetchCase } = useReadContract({
-    address: ESCROW_ADDRESS,
-    abi: ESCROW_ABI,
-    functionName: "cases",
-    args: [caseIdBigInt],
-  })
+  // Fetch case data from database
+  const { data: caseDataWithRelations, isLoading, error } = useCase(caseId)
+  const caseData = caseDataWithRelations?.case
 
   const { writeContract: writeAccept, data: acceptTxHash, isPending: isAcceptPending } = useWriteContract()
   const { writeContract: writeDispute, data: disputeTxHash, isPending: isDisputePending } = useWriteContract()
@@ -65,74 +59,69 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
     hash: submitTxHash,
   })
 
+  // Sync database after contract writes
+  const syncCaseFromChain = async () => {
+    try {
+      await fetch(`/api/cases/${caseId}/sync`, { method: 'POST' })
+      // Invalidate queries to refetch updated data from DB
+      queryClient.invalidateQueries({ queryKey: ['case', caseId] })
+      queryClient.invalidateQueries({ queryKey: ['cases'] })
+    } catch (error) {
+      console.error('Failed to sync case:', error)
+    }
+  }
+
   // Refresh case data on success
   useEffect(() => {
-    if (isAcceptSuccess || isSubmitSuccess) {
-      refetchCase()
-      toast({
-        title: "Transaction confirmed",
-        description: "Case updated successfully.",
+    if (isAcceptSuccess) {
+      syncCaseFromChain().then(() => {
+        toast({
+          title: "Payment Released",
+          description: "Case accepted and payment sent to payee.",
+        })
+      })
+    }
+    if (isSubmitSuccess) {
+      syncCaseFromChain().then(() => {
+        toast({
+          title: "Deliverables Submitted",
+          description: "Your work has been submitted for review.",
+        })
       })
     }
     if (isDisputeSuccess) {
-      // Wait a bit for the transaction to be reflected on-chain
-      setTimeout(() => {
-        refetchCase()
+      syncCaseFromChain().then(() => {
         setShowAIPanel(true)
         toast({
-          title: "Dispute opened",
+          title: "Dispute Opened",
           description: "AI arbitration has been initiated.",
         })
-      }, 1000)
-    }
-  }, [isAcceptSuccess, isDisputeSuccess, isSubmitSuccess, refetchCase, toast])
-
-  // Parse case data (safe even if caseData is null)
-  const raw = caseData as readonly unknown[] | null
-  const payer = raw?.[0] as string | undefined
-  const payee = raw?.[1] as string | undefined
-  const judge = raw?.[2] as string | undefined
-  const amount = raw?.[3] as bigint | undefined
-  const specs = raw?.[4] as string | undefined
-  const deliverables = raw?.[5] as string | undefined
-  const status = raw?.[7] ? Number(raw[7]) : undefined
-
-  const statusLabel = status !== undefined ? (STATUS_MAP[status] || "Funded") : undefined
-  const isPayer = address && payer ? address.toLowerCase() === payer.toLowerCase() : false
-  const isPayee = address && payee ? address.toLowerCase() === payee.toLowerCase() : false
-  // For testing: allow payer to submit if they're also the payee
-  const isSelfContract = payer && payee ? payer.toLowerCase() === payee.toLowerCase() : false
-  const role = isPayer ? "Payer" : isPayee ? "Payee" : null
-  
-  // Check if deliverables are empty (zero hash or empty string) - use deliverables before early return
-  const zeroHash = "0x0000000000000000000000000000000000000000000000000000000000000000"
-  const tempDeliverables = deliverables || ""
-  const hasDeliverables = tempDeliverables && tempDeliverables !== zeroHash && tempDeliverables !== "0x" && tempDeliverables.length > 2
-  
-  // Debug logging (must be before early return to follow Rules of Hooks)
-  useEffect(() => {
-    if (caseData && status !== undefined && statusLabel) {
-      console.log("Case Detail Debug:", {
-        caseId,
-        status,
-        statusLabel,
-        hasDeliverables,
-        deliverables: tempDeliverables,
-        isPayer,
-        isPayee,
-        isSelfContract,
-        role,
       })
     }
-  }, [caseId, status, statusLabel, hasDeliverables, tempDeliverables, isPayer, isPayee, isSelfContract, role, caseData])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAcceptSuccess, isDisputeSuccess, isSubmitSuccess, caseId])
 
-  if (!caseData || !payer || !payee || !judge || amount === undefined || status === undefined) {
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <Card>
+          <CardContent className="flex flex-col  items-center py-16">
+            <div className="text-sm text-muted-foreground">Loading case...</div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Error or not found state
+  if (error || !caseData) {
     return (
       <div className="flex h-full items-center justify-center p-6">
         <Card>
           <CardContent className="flex flex-col items-center py-16">
             <h3 className="mb-2 text-lg font-semibold">Case not found</h3>
-            <p className="mb-4 text-sm text-muted-foreground">The case you're looking for doesn't exist.</p>
+            <p className="mb-4 text-sm text-muted-foreground">The case you&apos;re looking for doesn&apos;t exist.</p>
             <Button onClick={() => router.push("/cases")}>Back to Cases</Button>
           </CardContent>
         </Card>
@@ -140,11 +129,22 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
     )
   }
 
-  // After early return, we know all values are defined
-  const finalStatusLabel = statusLabel!
-  const finalAmount = amount!
-  const finalSpecs = specs || ""
-  const finalDeliverables = deliverables || ""
+  // Extract data from DB case
+  const payer = caseData.payerAddress
+  const payee = caseData.payeeAddress
+  const judge = caseData.judgeAddress
+  const amountEth = parseFloat(caseData.amountEth || '0')
+  const statusLabel = caseData.status
+  const specsHash = caseData.specsHash
+  const deliverablesHash = caseData.deliverablesHash
+  const deliverables = caseDataWithRelations?.deliverables || []
+
+  const isPayer = address && payer ? address.toLowerCase() === payer.toLowerCase() : false
+  const isPayee = address && payee ? address.toLowerCase() === payee.toLowerCase() : false
+  const isSelfContract = payer && payee ? payer.toLowerCase() === payee.toLowerCase() : false
+  const role = isPayer ? "Payer" : isPayee ? "Payee" : null
+  
+  const hasDeliverables = !!deliverablesHash && deliverablesHash !== "0x0000000000000000000000000000000000000000000000000000000000000000"
 
   const handleAccept = () => {
     writeAccept({
@@ -165,22 +165,72 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
     })
   }
 
-  const handleSubmitDeliverables = () => {
-    if (!deliverableText) {
+  const handleSubmitDeliverables = async () => {
+    if (!deliverableText && selectedFiles.length === 0) {
       toast({
         title: "Error",
-        description: "Please enter a deliverable description",
+        description: "Please enter a description or upload files",
         variant: "destructive",
       })
       return
     }
-    writeSubmit({
-      address: ESCROW_ADDRESS,
-      abi: ESCROW_ABI,
-      functionName: "submitDeliverable",
-      args: [caseIdBigInt, textToBytes32Hash(deliverableText), BigInt(7 * 24 * 60 * 60)],
-    })
-    setShowSubmitForm(false)
+
+    setIsUploading(true)
+
+    try {
+      // Upload files to blob storage first
+      for (const file of selectedFiles) {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('caseIdOnChain', caseId)
+        formData.append('uploadedBy', address || '')
+
+        const response = await fetch('/api/deliverables/upload', {
+          method: 'POST',
+          body: formData,
+        })
+
+        if (!response.ok) {
+          throw new Error(`Failed to upload ${file.name}`)
+        }
+      }
+
+      // Build deliverable hash from text + file names
+      const allContent = [
+        deliverableText,
+        ...selectedFiles.map(f => f.name)
+      ].filter(Boolean).join('\n')
+
+      // Submit to contract
+      writeSubmit({
+        address: ESCROW_ADDRESS,
+        abi: ESCROW_ABI,
+        functionName: "submitDeliverable",
+        args: [caseIdBigInt, textToBytes32Hash(allContent), BigInt(7 * 24 * 60 * 60)],
+      })
+
+      setShowSubmitForm(false)
+      setSelectedFiles([])
+      setDeliverableText("")
+    } catch (error) {
+      toast({
+        title: "Upload Error",
+        description: error instanceof Error ? error.message : "Failed to upload deliverables",
+        variant: "destructive",
+      })
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setSelectedFiles(prev => [...prev, ...Array.from(e.target.files!)])
+    }
+  }
+
+  const removeFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index))
   }
 
   return (
@@ -193,13 +243,16 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
               <ArrowLeft className="h-5 w-5" />
             </Button>
             <div>
-              <h2 className="text-2xl font-bold">Case #{caseId}</h2>
+              <h2 className="text-2xl font-bold">
+                {caseData.title || `Case #${caseId}`}
+              </h2>
+              <p className="text-sm text-muted-foreground">Case #{caseId}</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <StatusBadge status={finalStatusLabel} />
+            <StatusBadge status={statusLabel} />
             <div className="text-right">
-              <div className="font-mono text-2xl font-bold">{formatEther(finalAmount)} ETH</div>
+              <div className="font-mono text-2xl font-bold">{amountEth.toFixed(3)} ETH</div>
               <div className="text-xs text-muted-foreground">Escrow Amount</div>
             </div>
           </div>
@@ -232,7 +285,7 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
             <CardTitle>Timeline</CardTitle>
           </CardHeader>
           <CardContent>
-            <TimelineStepper currentStatus={finalStatusLabel} />
+            <TimelineStepper currentStatus={statusLabel} />
           </CardContent>
         </Card>
 
@@ -241,10 +294,30 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
           <CardHeader>
             <CardTitle>Specifications</CardTitle>
           </CardHeader>
-          <CardContent>
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              Hash: {finalSpecs.slice(0, 20)}... (Specifications stored on-chain as hash)
-            </p>
+          <CardContent className="space-y-4">
+            {caseData.title && (
+              <div>
+                <h4 className="text-sm font-semibold mb-1">{caseData.title}</h4>
+                {caseData.description && (
+                  <p className="text-sm leading-relaxed text-muted-foreground">{caseData.description}</p>
+                )}
+              </div>
+            )}
+            <div className="pt-2 border-t">
+              <p className="text-xs text-muted-foreground">
+                Hash: <code className="font-mono">{specsHash?.slice(0, 20)}...</code> (stored on-chain)
+              </p>
+              {caseData.specsBlobUrl && (
+                <a 
+                  href={caseData.specsBlobUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-600 hover:underline mt-1 block"
+                >
+                  View full specifications →
+                </a>
+              )}
+            </div>
           </CardContent>
         </Card>
 
@@ -266,25 +339,63 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="rounded-lg border border-border bg-muted/50 p-4">
+                {deliverables.length > 0 ? (
+                  <div className="space-y-2">
+                    {deliverables.map((deliverable) => (
+                      <div key={deliverable.id} className="rounded-lg border border-border bg-muted/50 p-4">
+                        <div className="flex items-start gap-3">
+                          <FileText className="h-5 w-5 text-muted-foreground mt-0.5" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium mb-1">{deliverable.fileName}</p>
+                            <p className="text-xs text-muted-foreground mb-2">
+                              {deliverable.fileType} • {deliverable.fileSizeBytes ? `${(deliverable.fileSizeBytes / 1024).toFixed(1)} KB` : 'Unknown size'}
+                            </p>
+                            {deliverable.blobUrl && (
+                              <a 
+                                href={deliverable.blobUrl} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="text-xs text-blue-600 hover:underline"
+                              >
+                                View file →
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-border bg-muted/50 p-4">
                     <div className="flex items-start gap-3">
-                    <FileText className="h-5 w-5 text-muted-foreground mt-0.5" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium mb-1">Deliverables Submitted</p>
-                      <p className="text-sm text-muted-foreground mb-2">
-                        Hash: <code className="font-mono text-xs">{finalDeliverables.slice(0, 20)}...</code>
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Deliverables are stored on-chain as a hash. The AI judge will use this to evaluate the case.
-                      </p>
+                      <FileText className="h-5 w-5 text-muted-foreground mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium mb-1">Deliverables Submitted</p>
+                        <p className="text-sm text-muted-foreground mb-2">
+                          Hash: <code className="font-mono text-xs">{deliverablesHash?.slice(0, 20)}...</code>
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Deliverables are stored on-chain as a hash. The AI judge will use this to evaluate the case.
+                        </p>
+                        {caseData.deliverablesBlobUrl && (
+                          <a 
+                            href={caseData.deliverablesBlobUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-xs text-blue-600 hover:underline mt-2 block"
+                          >
+                            View deliverables →
+                          </a>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
                 {/* Show dummy deliverable preview for testing */}
                 {isSelfContract && (
                   <div className="rounded-lg border border-dashed border-border bg-background p-3">
                     <p className="text-xs text-muted-foreground italic">
-                      💡 Testing mode: You're both payer and payee. This is a self-contract for testing purposes.
+                      💡 Testing mode: You&apos;re both payer and payee. This is a self-contract for testing purposes.
                     </p>
                   </div>
                 )}
@@ -294,18 +405,23 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
         </Card>
 
         {/* AI Arbitration (if disputed) */}
-        {(status === 2 || showAIPanel) && (
+        {(statusLabel === 'Disputed' || showAIPanel) && (
           <AIArbitrationPanel
             caseData={{
               id: caseId,
-              status: finalStatusLabel,
+              status: statusLabel,
+              aiRationale: caseData.aiRationale || undefined,
+              winner: caseData.aiWinner as "Payer" | "Payee" | undefined,
             }}
             caseId={caseId}
-            isActive={status === 2 || showAIPanel}
-            onResolved={() => {
-              setTimeout(() => {
-                refetchCase()
-              }, 1000)
+            isActive={statusLabel === 'Disputed' || showAIPanel}
+            onResolved={async () => {
+              // First sync the database from the blockchain
+              await syncCaseFromChain()
+              toast({
+                title: "Case Resolved",
+                description: "The AI judge has made a decision.",
+              })
             }}
           />
         )}
@@ -313,7 +429,7 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
         {/* Actions */}
         <Card>
           <CardContent className="pt-6">
-            {role === "Payer" && status === 1 && (
+            {role === "Payer" && statusLabel === 'Submitted' && (
               <div className="flex flex-col gap-3 sm:flex-row">
                 <Button
                   className="flex-1 bg-green-600 hover:bg-green-700"
@@ -336,7 +452,7 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
                     <Alert>
                       <AlertCircle className="h-4 w-4" />
                       <AlertDescription>
-                        The AI judge's decision will be binding and final. Funds will be automatically distributed
+                        The AI judge&apos;s decision will be binding and final. Funds will be automatically distributed
                         based on the ruling.
                       </AlertDescription>
                     </Alert>
@@ -357,7 +473,7 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
               </div>
             )}
 
-            {((role === "Payee" || isSelfContract) && status === 0) && (
+            {((role === "Payee" || isSelfContract) && statusLabel === 'Funded') && (
               <div>
                 {!showSubmitForm ? (
                   <Button className="w-full" onClick={() => setShowSubmitForm(true)}>
@@ -368,26 +484,91 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
                     <div>
                       <label className="mb-2 block text-sm font-medium">Deliverables Description</label>
                       <Textarea
-                        placeholder="Describe what you've completed..."
+                        placeholder="Describe what you&apos;ve completed..."
                         value={deliverableText}
                         onChange={(e) => setDeliverableText(e.target.value)}
                         rows={4}
                       />
                     </div>
+
+                    {/* File Upload Section */}
+                    <div>
+                      <label className="mb-2 block text-sm font-medium">Upload Files (optional)</label>
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleFileSelect}
+                        multiple
+                        className="hidden"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full gap-2 bg-transparent"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <Upload className="h-4 w-4" />
+                        Choose Files
+                      </Button>
+                      
+                      {/* Selected Files List */}
+                      {selectedFiles.length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {selectedFiles.map((file, index) => (
+                            <div
+                              key={index}
+                              className="flex items-center justify-between rounded-lg border border-border bg-muted/50 px-3 py-2"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                <span className="truncate text-sm">{file.name}</span>
+                                <span className="shrink-0 text-xs text-muted-foreground">
+                                  ({(file.size / 1024).toFixed(1)} KB)
+                                </span>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 shrink-0"
+                                onClick={() => removeFile(index)}
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
                     <div className="flex gap-3">
                       <Button
                         variant="outline"
                         className="flex-1 bg-transparent"
-                        onClick={() => setShowSubmitForm(false)}
+                        onClick={() => {
+                          setShowSubmitForm(false)
+                          setSelectedFiles([])
+                          setDeliverableText("")
+                        }}
+                        disabled={isUploading}
                       >
                         Cancel
                       </Button>
                       <Button
                         className="flex-1"
                         onClick={handleSubmitDeliverables}
-                        disabled={isSubmitPending || isSubmitConfirming}
+                        disabled={isSubmitPending || isSubmitConfirming || isUploading}
                       >
-                        {isSubmitPending || isSubmitConfirming ? "Submitting..." : "Submit"}
+                        {isUploading ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Uploading...
+                          </>
+                        ) : isSubmitPending || isSubmitConfirming ? (
+                          "Submitting..."
+                        ) : (
+                          "Submit"
+                        )}
                       </Button>
                     </div>
                   </div>
@@ -395,12 +576,14 @@ export function CaseDetailView({ caseId }: { caseId: string }) {
               </div>
             )}
 
-            {(status === 2 || status === 3) && (
+            {(statusLabel === 'Disputed' || statusLabel === 'Resolved') && (
               <Alert>
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  {status === 3
-                    ? "This case has been resolved. No further actions are available."
+                  {statusLabel === 'Resolved'
+                    ? caseData.aiWinner 
+                      ? `This case has been resolved. Winner: ${caseData.aiWinner}`
+                      : "This case has been resolved. No further actions are available."
                     : "AI arbitration is in progress. Please wait for the decision."}
                 </AlertDescription>
               </Alert>

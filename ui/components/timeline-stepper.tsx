@@ -13,7 +13,7 @@ export function TimelineStepper({ currentStatus }: { currentStatus: CaseStatus }
   const currentIndex = steps.findIndex((s) => s.id === currentStatus)
 
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-center">
       {steps.map((step, index) => {
         const isComplete = index < currentIndex
         const isCurrent = index === currentIndex

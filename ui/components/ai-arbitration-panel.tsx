@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
-import { Brain } from "lucide-react"
+import { useEffect, useRef } from "react"
+import { Brain, Loader2 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -27,8 +27,6 @@ export function AIArbitrationPanel({
   onResolved?: () => void
 }) {
   const streamContainerRef = useRef<HTMLDivElement>(null)
-  const hasTriggeredAI = useRef(false)
-  const lastCaseId = useRef<string | number | null>(null)
 
   // Vercel AI SDK useCompletion hook - handles all streaming state
   const {
@@ -38,27 +36,18 @@ export function AIArbitrationPanel({
     complete, // Function to trigger completion
   } = useCompletion({
     api: "/api/resolve",
-    streamProtocol: "text", // Use text protocol to match toTextStreamResponse()
+    streamProtocol: "text",
     onFinish: () => {
       // Contract call happens server-side in onFinish
-      // Just refresh the UI after a delay
-      setTimeout(() => {
-        onResolved?.()
-      }, 2000)
+      // Wait for the transaction to be mined, then refresh
+      setTimeout(async () => {
+        await onResolved?.()
+      }, 4000) // Give 4 seconds for tx to be mined
     },
     onError: (err) => {
       console.error("AI resolution error:", err)
-      hasTriggeredAI.current = false // Reset on error so it can retry
     },
   })
-
-  // Reset trigger when caseId changes
-  useEffect(() => {
-    if (lastCaseId.current !== caseId) {
-      lastCaseId.current = caseId
-      hasTriggeredAI.current = false
-    }
-  }, [caseId])
 
   // Auto-scroll as text streams in
   useEffect(() => {
@@ -76,25 +65,21 @@ export function AIArbitrationPanel({
 
   const winner = getWinner()
   const isComplete = !isLoading && winner
-  const isResolved = caseData.status === "Resolved" && caseData.winner
+  const isResolved = caseData.status === "Resolved"
+  const isDisputed = caseData.status === "Disputed"
 
-  // Auto-trigger AI when panel becomes active and not already triggered
-  useEffect(() => {
-    if (isActive && !hasTriggeredAI.current && !isLoading && !completion && !isResolved) {
-      hasTriggeredAI.current = true
-      console.log("Triggering AI arbitration for case:", caseId)
+  // Manual trigger function - NO auto-trigger
+  const handleStartArbitration = () => {
+    if (!isLoading && !completion) {
       complete(`caseId:${caseId}`)
     }
-  }, [isActive, caseId, complete, isLoading, completion, isResolved])
-
-  // Manual trigger function
-  const handleManualTrigger = () => {
-    hasTriggeredAI.current = true
-    complete(`caseId:${caseId}`)
   }
 
-  // Show panel if disputed, actively streaming, or resolved with AI
-  if (!isActive && !isLoading && !completion && !isResolved) {
+  // Only show panel if:
+  // - Case is disputed (show "Start" button)
+  // - Currently streaming AI response
+  // - Case is resolved (show results)
+  if (!isDisputed && !isResolved && !isLoading && !completion) {
     return null
   }
 
@@ -107,84 +92,143 @@ export function AIArbitrationPanel({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Error state */}
         {error && (
           <Alert variant="destructive">
             <AlertDescription>
               <strong>Resolution failed:</strong> {error.message}
             </AlertDescription>
             <Button
-              onClick={handleManualTrigger}
+              onClick={handleStartArbitration}
               className="mt-2"
               size="sm"
               variant="outline"
+              disabled={isLoading}
             >
               Retry AI Arbitration
             </Button>
           </Alert>
         )}
 
-        {!isLoading && !completion && !isResolved && isActive && (
-          <div className="text-center">
-            <p className="mb-4 text-sm text-muted-foreground">
-              AI arbitration will begin automatically. If it doesn't start, click below.
-            </p>
-            <Button onClick={handleManualTrigger} className="gap-2">
+        {/* Disputed - waiting to start AI */}
+        {isDisputed && !isLoading && !completion && !error && (
+          <div className="text-center py-4">
+            <div className="mb-4 p-4 rounded-lg bg-amber-50 border border-amber-200">
+              <p className="text-sm font-medium text-amber-800 mb-2">
+                ⚖️ This case is under dispute
+              </p>
+              <p className="text-xs text-amber-700">
+                Click below to have the AI judge review the case and make a binding decision.
+              </p>
+            </div>
+            <Button 
+              onClick={handleStartArbitration} 
+              className="gap-2"
+              size="lg"
+            >
               <Brain className="h-4 w-4" />
-              Start AI Review
+              Start AI Arbitration
             </Button>
           </div>
         )}
 
-        {(isLoading || completion) && (
-          <div
-            ref={streamContainerRef}
-            className="space-y-2 rounded-lg bg-white p-4 font-mono text-xs max-h-64 overflow-y-auto border border-gray-200"
-          >
-            {completion.split("\n").map((line, i) => (
-              <div key={i} className="flex items-start gap-2 text-black">
-                <span className="">›</span>
-                <span>{line || " "}</span>
-              </div>
-            ))}
-            {isLoading && (
-              <div className="flex items-center gap-1 text-black">
+        {/* AI is currently analyzing */}
+        {isLoading && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>AI is analyzing the case...</span>
+            </div>
+            <div
+              ref={streamContainerRef}
+              className="space-y-2 rounded-lg bg-slate-50 p-4 font-mono text-xs max-h-64 overflow-y-auto border border-slate-200"
+            >
+              {completion.split("\n").map((line, i) => (
+                <div key={i} className="flex items-start gap-2 text-slate-700">
+                  <span className="text-slate-400">›</span>
+                  <span>{line || " "}</span>
+                </div>
+              ))}
+              <div className="flex items-center gap-1 text-slate-500">
                 <span className="animate-pulse">▋</span>
               </div>
-            )}
+            </div>
           </div>
         )}
 
-        {(isComplete || isResolved) && (winner || caseData.winner) && (
+        {/* AI completed - show streaming result */}
+        {!isLoading && completion && !isResolved && (
           <div className="space-y-4">
-            <Alert
-              className={
-                (winner || caseData.winner) === "Payee"
-                  ? "border-green-500/50 bg-green-50"
-                  : "border-red-500/50 bg-red-50"
-              }
+            <div
+              ref={streamContainerRef}
+              className="space-y-2 rounded-lg bg-slate-50 p-4 font-mono text-xs max-h-64 overflow-y-auto border border-slate-200"
             >
-              <AlertDescription className="font-semibold">
-                DECISION: {(winner || caseData.winner)?.toUpperCase()} WINS
-              </AlertDescription>
-            </Alert>
-
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Rationale</p>
-              <p className="text-sm leading-relaxed text-muted-foreground">
-                {caseData.aiRationale ||
-                  "The AI judge has determined the outcome based on the case evidence."}
-              </p>
+              {completion.split("\n").map((line, i) => (
+                <div key={i} className="flex items-start gap-2 text-slate-700">
+                  <span className="text-slate-400">›</span>
+                  <span>{line || " "}</span>
+                </div>
+              ))}
             </div>
-
-            {isResolved && (
-              <Alert className="border-green-500/50">
-                <AlertDescription className="text-sm">
-                  ✓ Funds have been transferred to{" "}
-                  {caseData.winner === "Payee" ? "the payee" : "the payer"}
+            {winner && (
+              <Alert
+                className={
+                  winner === "Payee"
+                    ? "border-green-500/50 bg-green-50"
+                    : "border-amber-500/50 bg-amber-50"
+                }
+              >
+                <AlertDescription className="font-semibold">
+                  DECISION: {winner.toUpperCase()} WINS
                 </AlertDescription>
               </Alert>
             )}
+            <p className="text-xs text-muted-foreground text-center">
+              Waiting for blockchain confirmation...
+            </p>
           </div>
+        )}
+
+        {/* Case already resolved - show stored results */}
+        {isResolved && caseData.winner && (
+          <div className="space-y-4">
+            <Alert
+              className={
+                caseData.winner === "Payee"
+                  ? "border-green-500/50 bg-green-50"
+                  : "border-amber-500/50 bg-amber-50"
+              }
+            >
+              <AlertDescription className="font-semibold">
+                DECISION: {caseData.winner.toUpperCase()} WINS
+              </AlertDescription>
+            </Alert>
+
+            {caseData.aiRationale && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">AI Rationale</p>
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  {caseData.aiRationale}
+                </p>
+              </div>
+            )}
+
+            <Alert className="border-green-500/50 bg-green-50">
+              <AlertDescription className="text-sm">
+                ✓ Funds have been transferred to{" "}
+                {caseData.winner === "Payee" ? "the payee" : "the payer"}
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
+
+        {/* Resolved but no winner stored (edge case) */}
+        {isResolved && !caseData.winner && (
+          <Alert className="border-slate-500/50 bg-slate-50">
+            <AlertDescription className="text-sm">
+              This case has been resolved.
+            </AlertDescription>
+          </Alert>
         )}
       </CardContent>
     </Card>

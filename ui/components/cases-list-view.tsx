@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { useAccount, useReadContract, useReadContracts } from "wagmi"
+import { useAccount } from "wagmi"
 import { Plus, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,24 +13,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { StatusBadge } from "@/components/status-badge"
 import { RoleBadge } from "@/components/role-badge"
 import { AddressDisplay } from "@/components/address-display"
-import { ESCROW_ABI, ESCROW_ADDRESS } from "@/lib/escrow"
-import { formatEther } from "viem"
-
-const STATUS_MAP: Record<number, "Funded" | "Submitted" | "Disputed" | "Resolved"> = {
-  0: "Funded",
-  1: "Submitted",
-  2: "Disputed",
-  3: "Resolved",
-}
-
-interface CaseItem {
-  id: number
-  payer: string
-  payee: string
-  judge: string
-  amount: bigint
-  status: number
-}
+import { useCases } from "@/hooks/use-cases"
+import type { Case } from "@/db/schema"
 
 export function CasesListView() {
   const router = useRouter()
@@ -39,60 +23,23 @@ export function CasesListView() {
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [roleFilter, setRoleFilter] = useState<string>("all")
 
-  // Fetch cases from contract
-  const { data: nextCaseId, isLoading: isLoadingCases } = useReadContract({
-    address: ESCROW_ADDRESS,
-    abi: ESCROW_ABI,
-    functionName: "nextCaseId",
-  })
+  // Fetch cases from database via API
+  const { data: cases = [], isLoading: isLoadingCases } = useCases()
 
-  const caseIds = useMemo(() => {
-    const n = Number(nextCaseId ?? 0n)
-    return n > 0 ? Array.from({ length: n }, (_, i) => BigInt(i)) : []
-  }, [nextCaseId])
-
-  const { data: casesData } = useReadContracts({
-    contracts: caseIds.map((id) => ({
-      address: ESCROW_ADDRESS,
-      abi: ESCROW_ABI,
-      functionName: "cases",
-      args: [id],
-    })),
-    allowFailure: true,
-  })
-
-  // Transform cases data
-  const cases: CaseItem[] = useMemo(() => {
-    if (!casesData) return []
-    return casesData
-      .map((result, idx) => {
-        if (result.status !== "success" || !result.result) return null
-        const raw = result.result as readonly unknown[]
-        return {
-          id: idx,
-          payer: raw[0] as string,
-          payee: raw[1] as string,
-          judge: raw[2] as string,
-          amount: raw[3] as bigint,
-          status: Number(raw[7] ?? 0),
-        }
-      })
-      .filter((c): c is CaseItem => c !== null)
-  }, [casesData])
-
-  const getUserRole = (caseItem: CaseItem): "Payer" | "Payee" => {
+  const getUserRole = (caseItem: Case): "Payer" | "Payee" => {
     if (!address) return "Payer"
-    return caseItem.payer.toLowerCase() === address.toLowerCase() ? "Payer" : "Payee"
+    return caseItem.payerAddress.toLowerCase() === address.toLowerCase() ? "Payer" : "Payee"
   }
 
   const filteredCases = cases.filter((caseItem) => {
     const matchesSearch =
       searchQuery === "" ||
-      caseItem.id.toString().includes(searchQuery) ||
-      caseItem.payer.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      caseItem.payee.toLowerCase().includes(searchQuery.toLowerCase())
+      caseItem.caseIdOnChain.toString().includes(searchQuery) ||
+      caseItem.payerAddress.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      caseItem.payeeAddress.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (caseItem.title || "").toLowerCase().includes(searchQuery.toLowerCase())
 
-    const matchesStatus = statusFilter === "all" || STATUS_MAP[caseItem.status] === statusFilter
+    const matchesStatus = statusFilter === "all" || caseItem.status === statusFilter
 
     const role = getUserRole(caseItem)
     const matchesRole = roleFilter === "all" || role === roleFilter
@@ -225,12 +172,13 @@ export function CasesListView() {
                 <TableBody>
                   {filteredCases.map((caseItem) => {
                     const role = getUserRole(caseItem)
-                    const counterparty = role === "Payer" ? caseItem.payee : caseItem.payer
+                    const counterparty = role === "Payer" ? caseItem.payeeAddress : caseItem.payerAddress
                     return (
                       <TableRow key={caseItem.id}>
                         <TableCell>
                           <div>
-                            <div className="font-medium">Case #{caseItem.id}</div>
+                            <div className="font-medium">{caseItem.title || `Case #${caseItem.caseIdOnChain}`}</div>
+                            <div className="text-xs text-muted-foreground">#{caseItem.caseIdOnChain}</div>
                           </div>
                         </TableCell>
                         <TableCell>
@@ -240,13 +188,13 @@ export function CasesListView() {
                           <AddressDisplay address={counterparty} />
                         </TableCell>
                         <TableCell>
-                          <span className="font-mono font-semibold">{formatEther(caseItem.amount)} ETH</span>
+                          <span className="font-mono font-semibold">{parseFloat(caseItem.amountEth || '0').toFixed(3)} ETH</span>
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={STATUS_MAP[caseItem.status]} />
+                          <StatusBadge status={caseItem.status} />
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="sm" onClick={() => router.push(`/cases/${caseItem.id}`)}>
+                          <Button variant="ghost" size="sm" onClick={() => router.push(`/cases/${caseItem.caseIdOnChain}`)}>
                             View
                           </Button>
                         </TableCell>
@@ -261,13 +209,13 @@ export function CasesListView() {
             <div className="space-y-4 md:hidden">
               {filteredCases.map((caseItem) => {
                 const role = getUserRole(caseItem)
-                const counterparty = role === "Payer" ? caseItem.payee : caseItem.payer
                 return (
                   <Card key={caseItem.id}>
                     <CardHeader>
                       <div className="flex items-start justify-between">
                         <div>
-                          <CardTitle className="text-base">Case #{caseItem.id}</CardTitle>
+                          <CardTitle className="text-base">{caseItem.title || `Case #${caseItem.caseIdOnChain}`}</CardTitle>
+                          <div className="text-xs text-muted-foreground mt-1">#{caseItem.caseIdOnChain}</div>
                         </div>
                         <RoleBadge role={role} />
                       </div>
@@ -275,13 +223,13 @@ export function CasesListView() {
                     <CardContent className="space-y-3">
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-muted-foreground">Amount</span>
-                        <span className="font-mono font-semibold">{formatEther(caseItem.amount)} ETH</span>
+                        <span className="font-mono font-semibold">{parseFloat(caseItem.amountEth || '0').toFixed(3)} ETH</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-muted-foreground">Status</span>
-                        <StatusBadge status={STATUS_MAP[caseItem.status]} />
+                        <StatusBadge status={caseItem.status} />
                       </div>
-                      <Button className="w-full" onClick={() => router.push(`/cases/${caseItem.id}`)}>
+                      <Button className="w-full" onClick={() => router.push(`/cases/${caseItem.caseIdOnChain}`)}>
                         View Details
                       </Button>
                     </CardContent>

@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { Menu, Plus, Search, Scale } from "lucide-react"
 import { ConnectButton } from "@rainbow-me/rainbowkit"
@@ -12,17 +12,8 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { StatusBadge } from "@/components/status-badge"
 import { RoleBadge } from "@/components/role-badge"
 import { cn } from "@/lib/utils"
-import { useReadContract, useReadContracts } from "wagmi"
-import { ESCROW_ABI, ESCROW_ADDRESS } from "@/lib/escrow"
-import { useMemo } from "react"
-
-interface CaseSummary {
-  id: number
-  payer: string
-  payee: string
-  status: number
-  amount: bigint
-}
+import { useCases } from "@/hooks/use-cases"
+import type { Case } from "@/db/schema"
 
 function CaseSidebarItem({
   caseItem,
@@ -30,20 +21,16 @@ function CaseSidebarItem({
   onClick,
   currentAddress,
 }: {
-  caseItem: CaseSummary
+  caseItem: Case
   isActive: boolean
   onClick: () => void
   currentAddress?: string
 }) {
-  const role = currentAddress?.toLowerCase() === caseItem.payer.toLowerCase() ? "Payer" : "Payee"
-  const statusMap: Record<number, "Funded" | "Submitted" | "Disputed" | "Resolved"> = {
-    0: "Funded",
-    1: "Submitted",
-    2: "Disputed",
-    3: "Resolved",
-  }
-  const status = statusMap[caseItem.status] || "Funded"
-  const amountEth = Number(caseItem.amount) / 1e18
+  const role = currentAddress?.toLowerCase() === caseItem.payerAddress.toLowerCase() 
+    ? "Payer" 
+    : "Payee"
+  const status = caseItem.status || 'Funded'
+  const amountEth = parseFloat(caseItem.amountEth || '0')
 
   return (
     <button
@@ -57,7 +44,9 @@ function CaseSidebarItem({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="truncate font-medium">Case #{caseItem.id}</div>
+          <div className="truncate font-medium">
+            {caseItem.title || `Case #${caseItem.caseIdOnChain}`}
+          </div>
         </div>
         <RoleBadge role={role} />
       </div>
@@ -75,50 +64,17 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { address } = useAccount()
 
-  // Fetch cases from contract
-  const { data: nextCaseId } = useReadContract({
-    address: ESCROW_ADDRESS,
-    abi: ESCROW_ABI,
-    functionName: "nextCaseId",
-  })
+  // Fetch cases from database via API
+  const { data: cases = [], isLoading, error } = useCases()
 
-  const caseIds = useMemo(() => {
-    const n = Number(nextCaseId ?? 0n)
-    return n > 0 ? Array.from({ length: n }, (_, i) => BigInt(i)) : []
-  }, [nextCaseId])
+  // Filter cases by status (using DB status strings)
+  const activeCases = cases.filter((c) => 
+    c.status === 'Funded' || c.status === 'Submitted' || c.status === 'Disputed'
+  )
+  const resolvedCases = cases.filter((c) => c.status === 'Resolved')
 
-  const { data: casesData } = useReadContracts({
-    contracts: caseIds.map((id) => ({
-      address: ESCROW_ADDRESS,
-      abi: ESCROW_ABI,
-      functionName: "cases",
-      args: [id],
-    })),
-    allowFailure: true,
-  })
-
-  // Transform cases data
-  const cases: CaseSummary[] = useMemo(() => {
-    if (!casesData) return []
-    return casesData
-      .map((result, idx) => {
-        if (result.status !== "success" || !result.result) return null
-        const raw = result.result as readonly unknown[]
-        return {
-          id: idx,
-          payer: raw[0] as string,
-          payee: raw[1] as string,
-          status: Number(raw[7] ?? 0),
-          amount: raw[3] as bigint,
-        }
-      })
-      .filter((c): c is CaseSummary => c !== null)
-  }, [casesData])
-
-  const activeCases = cases.filter((c) => [0, 1, 2].includes(c.status))
-  const resolvedCases = cases.filter((c) => c.status === 3)
-
-  const SidebarContent = () => (
+  // Memoize sidebar content to avoid creating component during render
+  const sidebarContent = useMemo(() => (
     <div className="flex h-full flex-col">
       {/* Brand */}
       <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-6">
@@ -145,35 +101,55 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           <Input placeholder="Search cases..." className="pl-9" />
         </div>
 
+        {/* Loading State */}
+        {isLoading && (
+          <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+            Loading cases...
+          </div>
+        )}
+
+        {/* Error State */}
+        {error && (
+          <div className="px-2 py-4 text-center text-sm text-red-500">
+            Failed to load cases
+          </div>
+        )}
+
         {/* Active Cases */}
-        <div className="space-y-1">
-          <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Active</div>
-          {activeCases.map((caseItem) => (
-            <CaseSidebarItem
-              key={caseItem.id}
-              caseItem={caseItem}
-              isActive={pathname === `/cases/${caseItem.id}`}
-              currentAddress={address}
-              onClick={() => {
-                router.push(`/cases/${caseItem.id}`)
-                setSidebarOpen(false)
-              }}
-            />
-          ))}
-        </div>
+        {!isLoading && !error && (
+          <div className="space-y-1">
+            <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Active</div>
+            {activeCases.length === 0 ? (
+              <div className="px-2 py-2 text-xs text-muted-foreground">No active cases</div>
+            ) : (
+              activeCases.map((caseItem) => (
+                <CaseSidebarItem
+                  key={caseItem.id}
+                  caseItem={caseItem}
+                  isActive={pathname === `/cases/${caseItem.caseIdOnChain}`}
+                  currentAddress={address}
+                  onClick={() => {
+                    router.push(`/cases/${caseItem.caseIdOnChain}`)
+                    setSidebarOpen(false)
+                  }}
+                />
+              ))
+            )}
+          </div>
+        )}
 
         {/* Resolved Cases */}
-        {resolvedCases.length > 0 && (
+        {!isLoading && !error && resolvedCases.length > 0 && (
           <div className="space-y-1">
             <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Resolved</div>
             {resolvedCases.map((caseItem) => (
               <CaseSidebarItem
                 key={caseItem.id}
                 caseItem={caseItem}
-                isActive={pathname === `/cases/${caseItem.id}`}
+                isActive={pathname === `/cases/${caseItem.caseIdOnChain}`}
                 currentAddress={address}
                 onClick={() => {
-                  router.push(`/cases/${caseItem.id}`)
+                  router.push(`/cases/${caseItem.caseIdOnChain}`)
                   setSidebarOpen(false)
                 }}
               />
@@ -182,19 +158,19 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         )}
       </div>
     </div>
-  )
+  ), [isLoading, error, activeCases, resolvedCases, pathname, address, router, setSidebarOpen])
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Desktop Sidebar */}
       <aside className="hidden w-80 border-r border-sidebar-border bg-sidebar lg:block">
-        <SidebarContent />
+        {sidebarContent}
       </aside>
 
       {/* Mobile Sidebar */}
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
         <SheetContent side="left" className="w-80 p-0">
-          <SidebarContent />
+          {sidebarContent}
         </SheetContent>
       </Sheet>
 
@@ -214,7 +190,16 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               {pathname === "/cases/new"
                 ? "New Case"
                 : pathname.startsWith("/cases/") && pathname !== "/cases/new"
-                  ? "Case Details"
+                  ? (() => {
+                      // Extract case ID from pathname and find the case title
+                      const caseIdMatch = pathname.match(/\/cases\/(\d+)/)
+                      if (caseIdMatch) {
+                        const caseIdOnChain = parseInt(caseIdMatch[1])
+                        const currentCase = cases.find(c => c.caseIdOnChain === caseIdOnChain)
+                        return currentCase?.title || `Case #${caseIdOnChain}`
+                      }
+                      return "Case Details"
+                    })()
                   : "Cases"}
             </h1>
           </div>

@@ -10,7 +10,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
 import { ESCROW_ABI, ESCROW_ADDRESS, AI_JUDGE_ADDRESS, textToBytes32Hash } from "@/lib/escrow"
-import { parseEther } from "viem"
+import { parseEther, decodeEventLog } from "viem"
+import { useQueryClient } from "@tanstack/react-query"
 
 interface Deliverable {
   id: string
@@ -22,6 +23,7 @@ export function NewCaseForm() {
   const router = useRouter()
   const { toast } = useToast()
   const { address } = useAccount()
+  const queryClient = useQueryClient()
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [payeeAddress, setPayeeAddress] = useState("")
@@ -30,9 +32,10 @@ export function NewCaseForm() {
   const [reviewWindow, setReviewWindow] = useState("")
   const [deliverables, setDeliverables] = useState<Deliverable[]>([{ id: "1", name: "", description: "" }])
   const [artifacts, setArtifacts] = useState<Deliverable[]>([])
+  const [isSavingToDb, setIsSavingToDb] = useState(false)
 
   const { writeContract, data: txHash, isPending } = useWriteContract()
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash })
+  const { isLoading: isConfirming, isSuccess, data: txReceipt } = useWaitForTransactionReceipt({ hash: txHash })
 
   const addDeliverable = () => {
     setDeliverables([...deliverables, { id: Date.now().toString(), name: "", description: "" }])
@@ -104,28 +107,102 @@ export function NewCaseForm() {
         args: [payeeAddress as `0x${string}`, textToBytes32Hash(specsText), AI_JUDGE_ADDRESS],
         value: parseEther(amount),
       })
-    } catch (error: any) {
+    } catch (error) {
       toast({
         title: "Error",
-        description: error.message || "Failed to create case",
+        description: error instanceof Error ? error.message : "Failed to create case",
         variant: "destructive",
       })
     }
   }
 
-  // Redirect on success
+  // Save to database after transaction is confirmed
   useEffect(() => {
-    if (isSuccess) {
-      toast({
-        title: "Case Created",
-        description: "Your escrow case has been created successfully.",
-      })
-      // Get the new case ID by reading nextCaseId after a delay
-      setTimeout(() => {
+    async function saveToDatabase() {
+      if (!isSuccess || !txReceipt || !address) return
+      
+      // Prevent duplicate saves
+      if (isSavingToDb) return
+      setIsSavingToDb(true)
+
+      try {
+        // Parse the CaseCreated event from transaction logs
+        const caseCreatedEvent = txReceipt.logs.find((log) => {
+          try {
+            const decoded = decodeEventLog({
+              abi: ESCROW_ABI,
+              data: log.data,
+              topics: log.topics,
+            })
+            return decoded.eventName === 'CaseCreated'
+          } catch {
+            return false
+          }
+        })
+
+        if (!caseCreatedEvent) {
+          throw new Error('CaseCreated event not found in transaction')
+        }
+
+        const decoded = decodeEventLog({
+          abi: ESCROW_ABI,
+          data: caseCreatedEvent.data,
+          topics: caseCreatedEvent.topics,
+        })
+
+        // Extract caseId from decoded args (indexed parameter)
+        const args = decoded.args as unknown as { caseId: bigint }
+        const caseIdOnChain = Number(args.caseId)
+
+        // Build specs text for storage
+        const specsText = buildSpecsText()
+
+        // Save to database via API
+        const response = await fetch('/api/cases', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            caseIdOnChain,
+            payerAddress: address,
+            payeeAddress,
+            judgeAddress: AI_JUDGE_ADDRESS,
+            title,
+            description,
+            amountEth: amount,
+            specsHash: textToBytes32Hash(specsText),
+            specsText,
+          }),
+        })
+
+        if (!response.ok) {
+          const error = await response.json()
+          console.error('Failed to save to database:', error)
+          // Don't throw - case is already on-chain, this is just metadata
+        }
+
+        // Invalidate queries to refresh the cases list
+        queryClient.invalidateQueries({ queryKey: ['cases'] })
+
+        toast({
+          title: "Case Created",
+          description: `Case #${caseIdOnChain} has been created successfully.`,
+        })
+
+        // Navigate to the new case
+        router.push(`/cases/${caseIdOnChain}`)
+      } catch (error) {
+        console.error('Error saving case to database:', error)
+        toast({
+          title: "Case Created",
+          description: "Case created on-chain. Metadata sync may be pending.",
+        })
         router.push("/cases")
-      }, 2000)
+      }
     }
-  }, [isSuccess, toast, router])
+
+    saveToDatabase()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSuccess, txReceipt, address, payeeAddress, title, description, amount, queryClient, toast, router, isSavingToDb])
 
   return (
     <div className="p-6">

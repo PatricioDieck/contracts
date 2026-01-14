@@ -52,18 +52,68 @@ async function main() {
     await tx.wait();
   };
 
-  console.log("\n📝 Creating demo cases:\n");
+  // Helper to open dispute
+  const openDispute = async (caseId: bigint, payerIdx: number) => {
+    const payer = signers[payerIdx];
+    const tx = await Escrow.connect(payer).openDispute(caseId);
+    await tx.wait();
+  };
 
-  // Case 0: SUBMITTED
-  const case0 = await createCase(YOU, 2, "1.5", "Build a responsive landing page with hero, features, and contact form");
-  await submitDeliverable(case0, 2, "Landing page complete");
+  // Helper to resolve dispute (as AI judge)
+  const resolveDispute = async (caseId: bigint, winnerIdx: number) => {
+    const judge = signers[AI_JUDGE];
+    const winner = signers[winnerIdx];
+    const rationaleHash = ethers.keccak256(ethers.toUtf8Bytes("AI determination"));
+    const tx = await Escrow.connect(judge).resolve(caseId, winner.address, rationaleHash);
+    await tx.wait();
+  };
 
-  // Case 1: SUBMITTED  
-  const case1 = await createCase(YOU, 3, "0.5", "Design a modern logo for tech startup, 3 variations");
-  await submitDeliverable(case1, 3, "3 logo variations delivered");
+  console.log("\n📝 Creating demo cases in all stages:\n");
 
-  // Case 2: FUNDED
-  await createCase(YOU, 4, "2.0", "Develop and audit an ERC-20 token contract");
+  // =========================================================================
+  // FUNDED CASES (Case 0, 1) - Waiting for deliverables
+  // =========================================================================
+  console.log("   📦 FUNDED (waiting for deliverables):");
+  await createCase(YOU, 2, "2.0", "API Integration Service - Build REST API with Stripe integration");
+  await createCase(YOU, 4, "3.5", "ERC-20 Token Contract Development with minting and burning");
+
+  // =========================================================================
+  // SUBMITTED CASES (Case 2, 3) - Waiting for review
+  // =========================================================================
+  console.log("\n   📤 SUBMITTED (waiting for review):");
+  const case2 = await createCase(YOU, 3, "1.5", "Website Redesign Project - responsive homepage with hero section");
+  await submitDeliverable(case2, 3, "Website redesign complete with all requested sections");
+
+  const case3 = await createCase(YOU, 2, "0.75", "Logo Design Package - 3 modern logo variations for tech startup");
+  await submitDeliverable(case3, 2, "3 logo variations with SVG source files delivered");
+
+  // =========================================================================
+  // DISPUTED CASE (Case 4) - AI judge reviewing
+  // =========================================================================
+  console.log("\n   ⚖️  DISPUTED (AI judge reviewing):");
+  const case4 = await createCase(3, YOU, "5.0", "Smart Contract Security Audit - Full DeFi protocol audit");
+  await submitDeliverable(case4, YOU, "Security audit report submitted");
+  await openDispute(case4, 3);
+  console.log(`   Case #${case4}: Dispute opened - ready for AI arbitration`);
+
+  // =========================================================================
+  // RESOLVED CASES (Case 5, 6) - Completed
+  // =========================================================================
+  console.log("\n   ✅ RESOLVED (completed):");
+  
+  // Case 5: Payee wins
+  const case5 = await createCase(YOU, 2, "3.8", "Mobile App UI/UX Design - Complete Figma designs and prototype");
+  await submitDeliverable(case5, 2, "Full UI/UX deliverables with design system");
+  await openDispute(case5, YOU);
+  await resolveDispute(case5, 2); // Payee wins
+  console.log(`   Case #${case5}: Resolved - Payee wins`);
+
+  // Case 6: Payer wins
+  const case6 = await createCase(YOU, 4, "0.5", "Video Editing Project - 60 second promotional video");
+  await submitDeliverable(case6, 4, "45 second video (incomplete)");
+  await openDispute(case6, YOU);
+  await resolveDispute(case6, YOU); // Payer wins (refund)
+  console.log(`   Case #${case6}: Resolved - Payer wins (refund)`);
 
   // =========================================================================
   // AUTO-UPDATE .env.hardhat

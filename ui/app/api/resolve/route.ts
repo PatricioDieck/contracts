@@ -4,6 +4,9 @@ import { privateKeyToAccount } from "viem/accounts";
 import { hardhat, sepolia, mainnet } from "viem/chains";
 import { streamText } from "ai";
 import { openai } from "@ai-sdk/openai";
+import { db } from "@/db/db";
+import { cases } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 import EscrowArtifact from "../../../../artifacts/contracts/Contract.sol/EscrowV01.json";
 
@@ -106,6 +109,22 @@ Be concise but thoughtful. Your decision is final and binding.`;
         
         await publicClient.waitForTransactionReceipt({ hash });
         console.log(`Case ${caseId} resolved. Winner: ${payeeWins ? "payee" : "payer"}, tx: ${hash}`);
+
+        // Update database with AI rationale and result
+        try {
+          await db.update(cases)
+            .set({
+              status: 'Resolved',
+              aiWinner: payeeWins ? 'Payee' : 'Payer',
+              aiRationale: text,
+              aiRationaleHash: rationaleHash,
+              resolvedAt: new Date(),
+            })
+            .where(eq(cases.caseIdOnChain, Number(caseId)));
+          console.log(`Database updated for case ${caseId}`);
+        } catch (dbErr) {
+          console.error("Failed to update database:", dbErr);
+        }
       } catch (err) {
         console.error("Failed to resolve:", err);
       }
