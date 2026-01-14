@@ -1,14 +1,14 @@
 "use client"
 
 import type React from "react"
-import { useState, useMemo } from "react"
+import { useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { Menu, Plus, Search, Scale } from "lucide-react"
 import { ConnectButton } from "@rainbow-me/rainbowkit"
 import { useAccount } from "wagmi"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
+import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { StatusBadge } from "@/components/status-badge"
 import { RoleBadge } from "@/components/role-badge"
 import { cn } from "@/lib/utils"
@@ -73,8 +73,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   )
   const resolvedCases = cases.filter((c) => c.status === 'Resolved')
 
-  // Memoize sidebar content to avoid creating component during render
-  const sidebarContent = useMemo(() => (
+  const sidebarContent = (
     <div className="flex h-full flex-col">
       {/* Brand */}
       <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-6">
@@ -158,7 +157,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         )}
       </div>
     </div>
-  ), [isLoading, error, activeCases, resolvedCases, pathname, address, router, setSidebarOpen])
+  )
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -179,13 +178,14 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         {/* Header */}
         <header className="flex h-16 items-center justify-between border-b border-border bg-card px-6">
           <div className="flex items-center gap-4">
-            <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-              <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="lg:hidden">
-                  <Menu className="h-5 w-5" />
-                </Button>
-              </SheetTrigger>
-            </Sheet>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="lg:hidden"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
             <h1 className="text-xl font-semibold">
               {pathname === "/cases/new"
                 ? "New Case"
