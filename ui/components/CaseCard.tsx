@@ -177,10 +177,10 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
       <div className="flex justify-between items-start mb-3">
         <b className="text-lg">Case #{caseId}</b>
         <span className={`px-2 py-1 rounded text-xs font-medium ${
-          status === 0 ? "bg-blue-100 text-blue-700" :
-          status === 1 ? "bg-yellow-100 text-yellow-700" :
-          status === 2 ? "bg-purple-100 text-purple-700" :
-          "bg-green-100 text-green-700"
+          status === 0 ? "bg-blue-100 text-blue-700" : // funded
+          status === 1 ? "bg-yellow-100 text-yellow-700" : // submitted
+          status === 2 ? "bg-purple-100 text-purple-700" : // disputed
+          "bg-green-100 text-green-700" // resolved
         }`}>
           {STATUS[status]}
         </span>
@@ -192,6 +192,7 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
         </div>
       ))}
 
+      {/* if are payee + case is funded they can submit a deliverable */}
       {canSubmitDeliverable && (
         <div className="mt-4 pt-4 border-t flex flex-col gap-2">
           <input
@@ -210,6 +211,7 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
         </div>
       )}
 
+      {/* if are payer + case is submitted they can accept or dispute */}
       {canAcceptOrDispute && !showDisputeConfirm && (
         <div className="mt-4 pt-4 border-t">
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Review the deliverable and decide:</p>
@@ -232,6 +234,7 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
         </div>
       )}
 
+      {/* if are payer + case is disputed they can confirm the dispute and INTIATE AI ARBITRATION */}
       {showDisputeConfirm && (
         <div className="mt-4 pt-4 border-t">
           <div className="bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-950 dark:to-indigo-950 rounded-lg p-4 border-2 border-purple-200 dark:border-purple-800">
@@ -268,6 +271,7 @@ export function CaseCard({ caseId, raw, onAction }: { caseId: number; raw: reado
         </div>
       )}
 
+      {/* if there is an error, show it */}
       {error && (
         <div className="mt-4 p-3 bg-red-100 dark:bg-red-950 rounded-lg border border-red-300 dark:border-red-800">
           <div className="text-sm text-red-700 dark:text-red-300">

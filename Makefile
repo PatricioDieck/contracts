@@ -34,4 +34,4 @@ deploy-mainnet:
 # Seed local dev
 seed:
 	cp .env.hardhat ui/.env.local
-	npx hardhat run scripts/seed.ts --network localhost
+	npx hardhat run scripts/seed.ts 

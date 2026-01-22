@@ -86,20 +86,27 @@ export default function Home() {
 
         <div className="bg-white dark:bg-zinc-900 rounded-lg p-6 mb-8">
           <h2 className="text-lg font-semibold mb-4 dark:text-white">Create Contract</h2>
+
           <div className="flex gap-6 mb-4">
             <div className="flex flex-col gap-3 flex-1">
+
               <label className="text-sm font-medium dark:text-zinc-300">Payer (you)</label>
               <input className="bg-gray-100 p-2 rounded text-gray-500" value={payer} disabled />
+
               <label className="text-sm font-medium dark:text-zinc-300">Payee Address</label>
               <input className="bg-gray-100 p-2 rounded" value={payee} onChange={(e) => setPayee(e.target.value)} placeholder="0x..." />
+
               <label className="text-sm font-medium dark:text-zinc-300">Amount (ETH)</label>
               <input className="bg-gray-100 p-2 rounded" value={amountEth} onChange={(e) => setAmountEth(e.target.value)} placeholder="0.01" />
+
             </div>
             <div className="flex flex-col flex-1">
               <label className="text-sm font-medium dark:text-zinc-300 mb-1">Specs</label>
               <textarea className="bg-gray-100 p-2 rounded flex-1 resize-none" value={specText} onChange={(e) => setSpecText(e.target.value)} placeholder="Contract terms..." />
             </div>
+
           </div>
+          
           <button className="bg-blue-500 text-white p-2 rounded font-bold w-full" onClick={onCreate} disabled={isPending || isConfirming}>
             {isPending ? "Confirm in wallet..." : isConfirming ? "Confirming..." : "Create Contract"}
           </button>
