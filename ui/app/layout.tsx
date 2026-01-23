@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 
 
 export const metadata: Metadata = {
-  title: "Baby Bitcoin",
-  description: "Baby Bitcoin AI Arbitrated Contracts",
+  title: "BabyBitcoin — AI-Powered Contract Dispute Resolution",
+  description: "Smart contracts that settle themselves. BabyBitcoin lets two parties agree to AI arbitration upfront. Disputes resolve in hours, not months. No lawyers. No courts.",
 };
 
 export default function RootLayout({
