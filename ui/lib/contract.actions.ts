@@ -1,5 +1,5 @@
 import { parseEther } from "viem";
-import { ESCROW_ABI, ESCROW_ADDRESS, AI_JUDGE_ADDRESS, textToBytes32Hash } from "./escrow";
+import { ESCROW_ABI, ESCROW_ADDRESS, AI_JUDGE_ADDRESS, textToBytes32Hash } from "./contract";
 
 /** Create a new escrow case */
 export function createCase(payee: string, specs: string, amountEth: string) {

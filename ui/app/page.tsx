@@ -107,7 +107,7 @@ export default function Home() {
           <h2 className="text-lg font-semibold mb-3 dark:text-white">Cases ({count})</h2>
           <div className="flex flex-col-reverse gap-3">
             {cases.map((c) => (
-              <CaseCard key={c.id} caseId={c.id} raw={c.raw} onAction={refresh} />
+              <CaseCard key={c.id} case={c} onAction={refresh} />
             ))}
           </div>
         </div>

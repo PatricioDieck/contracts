@@ -1,5 +1,5 @@
 import { useReadContract, useReadContracts } from "wagmi";
-import { ESCROW_ABI, ESCROW_ADDRESS } from "../lib/escrow";
+import { ESCROW_ABI, ESCROW_ADDRESS, parseCase, type Case } from "../lib/contract";
 
 export function useCases() {
   const { data: nextCaseId, refetch: refetchCount } = useReadContract({
@@ -20,9 +20,9 @@ export function useCases() {
     allowFailure: true,
   });
 
-  const cases = (casesData ?? [])
-    .map((r, idx) => r?.status === "success" ? { id: idx, raw: r.result as readonly unknown[] } : null)
-    .filter((c): c is { id: number; raw: readonly unknown[] } => c !== null);
+  const cases: Case[] = (casesData ?? [])
+    .map((r, idx) => r?.status === "success" ? parseCase(idx, r.result as readonly unknown[]) : null)
+    .filter((c): c is Case => c !== null);
 
   const refresh = () => {
     refetchCount();
