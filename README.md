@@ -1,4 +1,4 @@
-# BabyBitcoin
+# Arbiter
 
 **AI-arbitrated escrow contracts.** When parties disagree, an AI judge resolves disputes instead of lawyers.
 
