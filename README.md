@@ -2,6 +2,8 @@
 
 **AI-arbitrated escrow contracts.** When parties disagree, an AI judge resolves disputes instead of lawyers.
 
+https://github.com/user-attachments/assets/4b7ef153-4e6d-4b25-8d6d-f3b9b7703222
+
 ---
 
 ## How It Works (The Simple Version)
